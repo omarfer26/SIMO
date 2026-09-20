@@ -9,6 +9,9 @@ import type { Empresa, UsuarioSesion } from "./tipos";
 export const empresaMock: Empresa = {
   razonSocial: "Comercial San Andresito",
   nit: "900123456-7",
+  telefono: "601 555 0134",
+  direccion: "Calle 10 # 5-23, Cúcuta",
+  logoUrl: null,
 };
 
 export const usuarioMock: UsuarioSesion = {

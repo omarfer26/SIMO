@@ -10,9 +10,16 @@ export type RolUsuario =
   | "Vendedor"
   | "Encargado de Inventario";
 
+// SCRUM-111 (Camilo) — Empresa ganó teléfono, dirección y logo: los campos
+// que captura el formulario de "Parámetros de la Empresa" en /admin. Se
+// extendió acá (y no se duplicó en otro archivo) porque el Navbar ya usaba
+// este mismo tipo para razonSocial/nit.
 export interface Empresa {
   razonSocial: string;
   nit: string;
+  telefono: string;
+  direccion: string;
+  logoUrl: string | null;
 }
 
 export interface UsuarioSesion {
