@@ -201,12 +201,12 @@ export default function FormularioProductosPage() {
                     <hr className="mt-8 border-gray-300" />
 
                     <div className="flex justify-end gap-4 mt-6">
-                        <button
-                            type="button"
+                        <Link
+                            href="/catalogo"
                             className="px-6 py-2 border border-gray-800 text-gray-900 font-semibold rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-800 focus:ring-offset-2 transition-colors"
                         >
                             Cancelar
-                        </button>
+                        </Link>
                         <button
                             type="submit"
                             className="px-6 py-2 bg-[#3E5E51] text-white font-semibold rounded-md hover:bg-[#5C8371]/80 focus:outline-none focus:ring-2 focus:ring-[#3E5E51] focus:ring-offset-2 transition-colors"

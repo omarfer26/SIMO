@@ -6,6 +6,7 @@
 // poder leer `productos` del ProductosContext compartido en vez de usar
 // siempre el mock fijo — así los productos que se crean en
 // /formuProductos aparecen acá también, sin recargar la página.
+import Link from "next/link";
 import BusquedaCatalogo from "@/components/catalogo/BusquedaCatalogo";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 
@@ -14,13 +15,25 @@ export default function CatalogoPage() {
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-8">
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-        Catálogo de productos
-      </h1>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Busca por código o nombre, y combina los filtros de categoría,
-        disponibilidad y estado.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+            Catálogo de productos
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Busca por código o nombre, y combina los filtros de categoría,
+            disponibilidad y estado.
+          </p>
+        </div>
+        {/* Antes no había ningún link a /formuProductos en toda la app: solo
+            se podía entrar escribiendo la URL a mano. */}
+        <Link
+          href="/formuProductos"
+          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+        >
+          + Nuevo producto
+        </Link>
+      </div>
 
       <div className="mt-6">
         <BusquedaCatalogo productos={productos} />
