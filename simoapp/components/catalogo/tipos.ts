@@ -8,6 +8,18 @@ export type Categoria =
   | "Papelería"
   | "Hogar";
 
+// Las 5 categorías válidas, como lista (no solo como tipo), para poder
+// recorrerlas y armar un <select> — la usa el formulario de creación de
+// productos (app/formuProductos/page.tsx) en vez de dejar la categoría
+// como texto libre.
+export const CATEGORIAS: Categoria[] = [
+  "Electrónica",
+  "Ropa",
+  "Ferretería",
+  "Papelería",
+  "Hogar",
+];
+
 export type EstadoProducto = "Activo" | "Inactivo";
 
 export interface Producto {
@@ -17,6 +29,11 @@ export interface Producto {
   descripcion: string;
   categoria: Categoria;
   unidadMedida: string;
+  // precioCompra faltaba en la versión original de SCRUM-31 (la búsqueda
+  // no lo necesitaba). Se agregó al integrar el formulario de creación de
+  // productos, que sí lo pide, y porque ya está en el modelo oficial de
+  // Producto en CLAUDE.md.
+  precioCompra: number;
   precioVenta: number;
   stockActual: number;
   stockMinimo: number;
