@@ -2,3 +2,9 @@ node_modules/
 .env
 .DS_Store
 camilo-sanchez.md
+
+# Carpeta de build de Next.js: a veces queda mal ubicada acá en la raíz
+# (en vez de simoapp/.next, que ya está en simoapp/.gitignore) por el
+# package.json suelto en la raíz que confunde a Turbopack sobre cuál es
+# el "workspace root".
+.next/
