@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Shell from "@/components/shell/Shell";
-import { ProductosProvider } from "@/components/catalogo/ProductosContext";
-
+import "./globals.css";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -19,22 +17,16 @@ export const metadata: Metadata = {
   description: "Sistema de gestión de inventarios, ventas y pedidos",
 };
 
-// SCRUM-107 (Camilo) — El Shell (Navbar + Sidebar) envuelve toda la app
-// desde acá porque todavía no existe página de login (es de otro ticket del
-// módulo de Seguridad). Por ahora el Navbar/Sidebar aparecen en todas las
-// rutas, incluida "/". Cuando exista login, este <Shell> debería moverse a
-// un layout dentro de un route group (ej. app/(app)/layout.tsx) que no
-// incluya la ruta de login, para que esa pantalla no tenga Navbar/Sidebar.
-export default function RootLayout({ children }: LayoutProps<"/">) {
+// El Shell y ProductosProvider han sido movidos a app/(protected)/layout.tsx
+// para que la pantalla de Login no los muestre.
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <ProductosProvider>
-          <Shell>{children}</Shell>
-        </ProductosProvider>
+        {children}
       </body>
     </html>
   );
