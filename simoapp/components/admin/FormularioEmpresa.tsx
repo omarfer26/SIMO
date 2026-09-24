@@ -6,9 +6,14 @@
 // (`onGuardar`, `onCerrar`), y no sabe nada de dónde viven esos datos. No
 // hay backend todavía, así que "guardar" solo arma el objeto actualizado y
 // se lo pasa al padre — ver limitación documentada en camilo-sanchez.md.
+// SCRUM-108 (Camilo) — Los 4 campos y los botones Cancelar/Guardar ahora usan
+// los componentes base de components/ui (InputText y Button), en vez del
+// CampoTexto y los <button> que estaban escritos a mano en este archivo.
 
 import { useEffect, useState } from "react";
 import type { Empresa } from "@/components/shell/tipos";
+import Button from "@/components/ui/Button";
+import InputText from "@/components/ui/InputText";
 import FileUpload from "./FileUpload";
 
 interface FormularioEmpresaProps {
@@ -111,7 +116,15 @@ export default function FormularioEmpresa({
           </button>
         </div>
 
-        <form onSubmit={manejarSubmit} className="mt-4 space-y-4">
+        {/* noValidate: la validación la hace manejarSubmit y los errores se
+            muestran con el estilo de InputText. Sin esto, el `required` de
+            los campos haría que el navegador mostrara su propio globito de
+            error antes de llegar a manejarSubmit. */}
+        <form
+          onSubmit={manejarSubmit}
+          noValidate
+          className="mt-4 space-y-4"
+        >
           <div>
             <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
               Logo
@@ -127,85 +140,47 @@ export default function FormularioEmpresa({
             />
           </div>
 
-          <CampoTexto
+          <InputText
             id="razonSocial"
-            etiqueta="Razón Social"
-            valor={valores.razonSocial}
+            label="Razón Social"
+            required
+            value={valores.razonSocial}
             error={errores.razonSocial}
-            onChange={(v) => actualizarCampo("razonSocial", v)}
+            onChange={(e) => actualizarCampo("razonSocial", e.target.value)}
           />
-          <CampoTexto
+          <InputText
             id="nit"
-            etiqueta="NIT"
-            valor={valores.nit}
+            label="NIT"
+            required
+            value={valores.nit}
             error={errores.nit}
-            onChange={(v) => actualizarCampo("nit", v)}
+            onChange={(e) => actualizarCampo("nit", e.target.value)}
           />
-          <CampoTexto
+          <InputText
             id="telefono"
-            etiqueta="Teléfono"
-            valor={valores.telefono}
+            label="Teléfono"
+            required
+            value={valores.telefono}
             error={errores.telefono}
-            onChange={(v) => actualizarCampo("telefono", v)}
+            onChange={(e) => actualizarCampo("telefono", e.target.value)}
           />
-          <CampoTexto
+          <InputText
             id="direccion"
-            etiqueta="Dirección"
-            valor={valores.direccion}
+            label="Dirección"
+            required
+            value={valores.direccion}
             error={errores.direccion}
-            onChange={(v) => actualizarCampo("direccion", v)}
+            onChange={(e) => actualizarCampo("direccion", e.target.value)}
           />
 
           <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onCerrar}
-              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            >
+            <Button variant="secondary" onClick={onCerrar}>
               Cancelar
-            </button>
-            <button
-              type="submit"
-              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-            >
-              Guardar cambios
-            </button>
+            </Button>
+            <Button type="submit">Guardar cambios</Button>
           </div>
         </form>
       </div>
-    </div>
-  );
-}
-
-interface CampoTextoProps {
-  id: string;
-  etiqueta: string;
-  valor: string;
-  error?: string;
-  onChange: (valor: string) => void;
-}
-
-function CampoTexto({ id, etiqueta, valor, error, onChange }: CampoTextoProps) {
-  return (
-    <div>
-      <label
-        htmlFor={id}
-        className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-      >
-        {etiqueta}
-      </label>
-      <input
-        id={id}
-        type="text"
-        value={valor}
-        onChange={(e) => onChange(e.target.value)}
-        className={`w-full rounded-md border px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-1 dark:text-zinc-100 ${
-          error
-            ? "border-red-400 focus:border-red-500 focus:ring-red-500"
-            : "border-zinc-300 focus:border-zinc-500 focus:ring-zinc-500 dark:border-zinc-700"
-        } bg-white dark:bg-zinc-900`}
-      />
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
 }
