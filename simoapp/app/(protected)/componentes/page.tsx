@@ -7,6 +7,10 @@
 // formulario con validación para ver los errores en acción. No aparece en
 // el Sidebar a propósito (no es un módulo del sistema): se entra escribiendo
 // /componentes en la barra de direcciones.
+// Los ejemplos "con error" de las secciones de arriba son muestras fijas (el
+// mensaje está escrito aquí y no se puede editar el valor), para que no
+// parezca un error del sistema que sigan en rojo. La validación de verdad
+// está en la sección "Ejemplo con validación", al final.
 
 import { useState } from "react";
 import Button from "@/components/ui/Button";
@@ -86,6 +90,17 @@ export default function ComponentesPage() {
         mano.
       </p>
 
+      <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+        Los campos en rojo de las secciones InputText, InputNumber y Select son{" "}
+        <strong>muestras fijas</strong>: enseñan cómo se ve un error, pero no
+        validan lo que se escribe ni se pueden cambiar. Para probar la
+        validación de verdad, usa el{" "}
+        <a href="#ejemplo-validacion" className="font-medium underline">
+          Ejemplo con validación
+        </a>{" "}
+        al final de la página.
+      </div>
+
       <Seccion
         titulo="Button"
         importar='import Button from "@/components/ui/Button";'
@@ -125,6 +140,7 @@ export default function ComponentesPage() {
           <InputText
             label="Con error"
             required
+            readOnly
             defaultValue="correo-invalido"
             error="Ingrese un correo válido."
           />
@@ -142,6 +158,7 @@ export default function ComponentesPage() {
           <InputNumber
             label="Stock mínimo"
             required
+            readOnly
             defaultValue={-5}
             error="El stock mínimo no puede ser negativo."
           />
@@ -163,10 +180,13 @@ export default function ComponentesPage() {
             label="Método de pago"
             required
             placeholder="Seleccione un método"
+            // Un <select> no tiene modo "solo lectura" (y `disabled` lo
+            // pondría gris, tapando el rojo del error): por eso la muestra
+            // deshabilita cada opción, así se ve la lista pero no se elige.
             options={[
-              { value: "efectivo", label: "Efectivo" },
-              { value: "nequi", label: "Nequi" },
-              { value: "daviplata", label: "Daviplata" },
+              { value: "efectivo", label: "Efectivo", disabled: true },
+              { value: "nequi", label: "Nequi", disabled: true },
+              { value: "daviplata", label: "Daviplata", disabled: true },
             ]}
             error="Seleccione cómo pagó el cliente."
           />
@@ -174,6 +194,7 @@ export default function ComponentesPage() {
       </Seccion>
 
       <Seccion
+        id="ejemplo-validacion"
         titulo="Ejemplo con validación"
         descripcion='Presione "Validar" con los campos vacíos para ver los errores; desaparecen apenas se corrige cada campo.'
       >
@@ -229,15 +250,27 @@ export default function ComponentesPage() {
 }
 
 interface SeccionProps {
+  id?: string;
   titulo: string;
   descripcion: string;
   importar?: string;
   children: React.ReactNode;
 }
 
-function Seccion({ titulo, descripcion, importar, children }: SeccionProps) {
+function Seccion({
+  id,
+  titulo,
+  descripcion,
+  importar,
+  children,
+}: SeccionProps) {
+  // scroll-mt-20: al saltar con el link de la nota, deja espacio para que
+  // el Navbar (fijo arriba, 56px) no tape el título de la sección.
   return (
-    <section className="mt-8 rounded-lg border border-zinc-200 p-6 dark:border-zinc-800">
+    <section
+      id={id}
+      className="mt-8 scroll-mt-20 rounded-lg border border-zinc-200 p-6 dark:border-zinc-800"
+    >
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
         {titulo}
       </h2>
