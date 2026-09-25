@@ -18,6 +18,7 @@ import InputNumber from "@/components/ui/InputNumber";
 import InputText from "@/components/ui/InputText";
 import Select from "@/components/ui/Select";
 import { CATEGORIAS } from "@/components/catalogo/tipos";
+import EjemplosTabla from "./EjemplosTabla";
 
 const opcionesCategoria = CATEGORIAS.map((categoria) => ({
   value: categoria,
@@ -191,6 +192,15 @@ export default function ComponentesPage() {
             error="Seleccione cómo pagó el cliente."
           />
         </div>
+      </Seccion>
+
+      {/* SCRUM-110 (Camilo) — Sección de la tabla de datos reutilizable. */}
+      <Seccion
+        titulo="DataTable"
+        importar='import DataTable, { type ColumnaTabla } from "@/components/ui/DataTable";'
+        descripcion="Las columnas se pasan en columns (header, accessor para el valor, render para dibujarlo, sortable, align). Clic en un encabezado con flechitas: ascendente → descendente → sin orden. Buscar y filtrar lo hace la página; la tabla ordena y pagina lo que recibe. En celular se desliza de lado."
+      >
+        <EjemplosTabla />
       </Seccion>
 
       <Seccion
