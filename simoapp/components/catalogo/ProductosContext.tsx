@@ -19,7 +19,7 @@ type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "estado">;
 
 interface ProductosContextValue {
   productos: Producto[];
-  agregarProducto: (datos: ProductoNuevo) => void;
+  agregarProducto: (datos: ProductoNuevo) => Promise<void>;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -27,18 +27,56 @@ const ProductosContext = createContext<ProductosContextValue | null>(null);
 export function ProductosProvider({ children }: { children: ReactNode }) {
   const [productos, setProductos] = useState<Producto[]>(productosMock);
 
-  function agregarProducto(datos: ProductoNuevo) {
-    setProductos((actuales) => [
-      ...actuales,
-      {
-        ...datos,
-        id: Math.max(0, ...actuales.map((p) => p.id)) + 1,
-        // Un producto recién creado todavía no tiene movimientos en el
-        // Kardex, así que arranca sin stock y activo por defecto.
-        stockActual: 0,
-        estado: "Activo",
-      },
-    ]);
+  async function agregarProducto(datos: ProductoNuevo) {
+    try {
+      const categoryMap: Record<string, number> = {
+        "Electrónica": 1,
+        "Ropa": 2,
+        "Ferretería": 3,
+        "Papelería": 4,
+        "Hogar": 5
+      };
+
+      const payload = {
+        id_categoria: categoryMap[datos.categoria] || 1,
+        codigo_barras: datos.codigo,
+        nombre: datos.nombre,
+        descripcion: datos.descripcion,
+        precio_compra: datos.precioCompra,
+        precio_venta: datos.precioVenta,
+        stock_minimo: datos.stockMinimo
+      };
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+      const res = await fetch(`${apiUrl}/products`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.error("Error from backend:", errorData);
+        alert(`Error: ${errorData.message}`);
+        return;
+      }
+
+      const { producto } = await res.json();
+
+      setProductos((actuales) => [
+        ...actuales,
+        {
+          ...datos,
+          id: producto.id_producto,
+          codigo: producto.codigo_barras,
+          stockActual: producto.stock_actual,
+          estado: producto.estado ? "Activo" : "Inactivo",
+        },
+      ]);
+    } catch (error) {
+      console.error("Error conectando al backend", error);
+      alert("Error conectando al backend");
+    }
   }
 
   return (

@@ -18,12 +18,12 @@ export default function FormularioProductosPage() {
     const { agregarProducto } = useProductos();
     const [showNotification, setShowNotification] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
 
         const formData = new FormData(e.currentTarget);
 
-        agregarProducto({
+        await agregarProducto({
             codigo: String(formData.get("codigo")),
             nombre: String(formData.get("nombre")),
             descripcion: String(formData.get("descripcion")),
