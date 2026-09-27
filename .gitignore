@@ -8,3 +8,7 @@ camilo-sanchez.md
 # package.json suelto en la raíz que confunde a Turbopack sobre cuál es
 # el "workspace root".
 .next/
+backend/.env
+backend/node_modules/
+simoapp/.env
+simoapp/node_modules/
