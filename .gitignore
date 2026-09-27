@@ -1,7 +1,7 @@
-<<<<<<< HEAD
-node_modules
-=======
 node_modules/
 .env
 .DS_Store
->>>>>>> front-end
+backend/.env
+backend/node_modules/
+simoapp/.env
+simoapp/node_modules/
