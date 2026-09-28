@@ -1,0 +1,112 @@
+# SIMO - Despliegue (servidor en la Mac del equipo + Cloudflare Tunnel)
+#
+#   cd deploy
+#   cp .env.example .env      # y completar los valores
+#   docker compose up -d --build
+#
+# Ningún servicio queda expuesto a la red local ni a internet por puertos:
+# los puertos publicados solo escuchan en 127.0.0.1 (la propia Mac) y el
+# acceso externo entra únicamente por el túnel de Cloudflare.
+# Guía completa: deploy/README.md
+
+name: simo
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: simo_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-simo_retail}
+      SIMO_SEED: ${SIMO_SEED:-false}
+      SIMO_APP_PASSWORD: ${SIMO_APP_PASSWORD:?Defina SIMO_APP_PASSWORD en deploy/.env}
+      TZ: America/Bogota
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # PostgreSQL 18+ guarda los datos en /var/lib/postgresql/18/docker
+      - pgdata:/var/lib/postgresql
+      # Migraciones, seed opcional y rol simo_app (solo con el volumen vacío)
+      - ../backend/db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ../backend
+    container_name: simo_api
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-simo_retail}
+      # La API usa el rol de mínimo privilegio, nunca el superusuario
+      DB_USER: simo_app
+      DB_PASSWORD: ${SIMO_APP_PASSWORD}
+      PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ../simoapp
+      dockerfile: ../deploy/frontend/Dockerfile
+      args:
+        # Vacío mientras la API no esté publicada (se publica con SCRUM-16/18)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    container_name: simo_frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  backup:
+    image: postgres:18-alpine
+    container_name: simo_backup
+    restart: unless-stopped
+    entrypoint: ["sh", "/respaldo.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-simo_retail}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # Hora de Colombia (UTC-5, sin horario de verano) sin depender de tzdata
+      TZ: "<-05>5"
+    volumes:
+      - ./backup/respaldo.sh:/respaldo.sh:ro
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: simo_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Defina CLOUDFLARE_TUNNEL_TOKEN en deploy/.env}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

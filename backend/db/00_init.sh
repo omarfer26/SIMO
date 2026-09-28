@@ -8,7 +8,9 @@
 # También se puede ejecutar a mano contra una base local:
 #   POSTGRES_USER=postgres POSTGRES_DB=simo_retail sh db/00_init.sh
 #
-# SIMO_SEED=false omite los datos de desarrollo.
+# Variables opcionales:
+#   SIMO_SEED=false          omite los datos de desarrollo
+#   SIMO_APP_PASSWORD=...    crea/actualiza el rol simo_app que usa la API
 set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,4 +34,9 @@ run_dir migrations
 
 if [ "${SIMO_SEED:-true}" = "true" ]; then
     run_dir seeds
+fi
+
+if [ -n "${SIMO_APP_PASSWORD:-}" ]; then
+    echo "SIMO > configurando el rol simo_app"
+    $PSQL -v app_password="$SIMO_APP_PASSWORD" -f "$DIR/roles/001_rol_aplicacion.sql"
 fi

@@ -11,6 +11,16 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json()); // Permite a Express leer el cuerpo (body) de las peticiones en formato JSON
 
+// Estado del servicio: lo usan Docker (healthcheck) y el monitoreo del despliegue
+app.get('/api/health', async (req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        res.json({ status: 'ok', database: 'ok' });
+    } catch (error) {
+        res.status(503).json({ status: 'error', database: 'unavailable' });
+    }
+});
+
 // Módulo de usuarios (SCRUM-22, SCRUM-23)
 app.use('/api/users', usuariosRoutes);
 
