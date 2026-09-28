@@ -39,8 +39,12 @@ DB_USER=postgres
 DB_PASSWORD=123456
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=retail
+DB_NAME=simo_retail
 PORT=3000
+SIMO_SEED=true
+```
+
+Al crear el contenedor por primera vez, PostgreSQL ejecuta automáticamente las migraciones de `backend/db/migrations` y los datos de prueba de `backend/db/seeds` (ver `backend/db/README.md`).
 
 🚀 Guía de Inicio Rápido
 Requisitos Previos
@@ -95,7 +99,7 @@ Host: localhost
 
 Puerto: 5432
 
-Base de Datos: retail
+Base de Datos: simo_retail
 
 Usuario: postgres
 
@@ -115,10 +119,12 @@ Body:
 JSON
 {
   "id_categoria": 1,
-  "codigo_barras": "7701234567890",
+  "id_unidad": 1,
+  "sku": "7701234567890",
   "nombre": "Teclado Mecánico RGB",
   "descripcion": "Teclado para juegos con switches red",
   "precio_compra": 45.00,
   "precio_venta": 75.00,
-  "stock_minimo": 5
+  "stock_minimo_bodega": 10,
+  "stock_minimo_almacen": 5
 }
