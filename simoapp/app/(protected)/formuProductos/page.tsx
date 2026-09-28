@@ -21,7 +21,11 @@ export default function FormularioProductosPage() {
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
 
-        const formData = new FormData(e.currentTarget);
+        // (Camilo) — Se guarda el formulario en una variable antes del
+        // `await`: después de esperar al backend, React deja
+        // e.currentTarget en null y el reset() de abajo fallaba.
+        const form = e.currentTarget;
+        const formData = new FormData(form);
 
         await agregarProducto({
             codigo: String(formData.get("codigo")),
@@ -34,7 +38,7 @@ export default function FormularioProductosPage() {
             stockMinimo: Number(formData.get("stockMinimo")),
         });
 
-        e.currentTarget.reset();
+        form.reset();
         setShowNotification(true);
         // Ocultar la notificación después de 3 segundos
         setTimeout(() => setShowNotification(false), 3000);

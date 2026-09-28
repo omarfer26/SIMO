@@ -37,14 +37,29 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
         "Hogar": 5
       };
 
+      // (Camilo) — IDs de la tabla `unidades_medida` del esquema de Ramón
+      // (003_catalogo.sql). El formulario tiene la unidad como texto libre,
+      // así que se aceptan nombre y abreviatura; si no coincide, "Unidad".
+      const unitMap: Record<string, number> = {
+        "unidad": 1, "und": 1,
+        "kilogramo": 2, "kg": 2,
+        "gramo": 3, "g": 3,
+        "litro": 4, "litros": 4, "l": 4
+      };
+
+      // (Camilo) — Nombres de campos alineados con el POST /api/products de
+      // la rama back-end (sku, id_unidad, stock mínimo por bodega/almacén).
+      // El formulario tiene un solo stock mínimo: se envía como el de bodega
+      // y el de almacén queda en 0 (valor por defecto del backend).
       const payload = {
         id_categoria: categoryMap[datos.categoria] || 1,
-        codigo_barras: datos.codigo,
+        id_unidad: unitMap[datos.unidadMedida.trim().toLowerCase()] || 1,
+        sku: datos.codigo,
         nombre: datos.nombre,
         descripcion: datos.descripcion,
         precio_compra: datos.precioCompra,
         precio_venta: datos.precioVenta,
-        stock_minimo: datos.stockMinimo
+        stock_minimo_bodega: datos.stockMinimo
       };
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
@@ -68,8 +83,9 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
         {
           ...datos,
           id: producto.id_producto,
-          codigo: producto.codigo_barras,
-          stockActual: producto.stock_actual,
+          codigo: producto.sku,
+          // stock_total es NUMERIC en PostgreSQL y llega como texto ("0.000")
+          stockActual: Number(producto.stock_total),
           estado: producto.estado ? "Activo" : "Inactivo",
         },
       ]);
