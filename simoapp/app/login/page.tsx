@@ -6,9 +6,15 @@ export default function LoginPage() {
   const router = useRouter();
 
   const handleLogin = () => {
-    // Simula el login guardando un token y un rol (por defecto ADMIN para pruebas)
-    localStorage.setItem("token", "fake-jwt-token-123");
-    localStorage.setItem("role", "ADMIN");
+    // Simula el login guardando un token y un rol en Cookies
+    const expires = new Date(Date.now() + 86400 * 1000).toUTCString();
+    document.cookie = `token=fake-jwt-token-123; path=/; expires=${expires}`;
+    document.cookie = `role=ADMIN; path=/; expires=${expires}`;
+    
+    // Limpiamos localStorage por si quedaron datos viejos de sesiones previas
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    
     router.push("/catalogo");
   };
 
