@@ -1,0 +1,12 @@
+{
+  "name": "simo-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix simoapp",
+    "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix simoapp\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
