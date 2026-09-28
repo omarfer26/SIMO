@@ -14,6 +14,7 @@ const protectedRoutes = [
 
 export function middleware(request: NextRequest) {
   const token = request.cookies.get('token')?.value
+  const role = request.cookies.get('role')?.value
   const { pathname } = request.nextUrl
 
   // Verificar si la ruta actual empieza con alguna de las protegidas
@@ -23,6 +24,11 @@ export function middleware(request: NextRequest) {
     // Si la ruta es protegida y no hay token, redirigir al login
     const loginUrl = new URL('/login', request.url)
     return NextResponse.redirect(loginUrl)
+  }
+
+  // Protección de roles: Solo admin puede ver /usuarios
+  if (pathname.startsWith('/usuarios') && role !== 'ADMIN') {
+    return NextResponse.redirect(new URL('/catalogo', request.url))
   }
 
   // Si está en la página de login pero ya tiene token, lo enviamos al catálogo
