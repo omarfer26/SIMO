@@ -59,6 +59,23 @@ services:
       timeout: 5s
       retries: 3
 
+  frontend:
+    build:
+      context: ../simoapp
+      dockerfile: ../deploy/frontend/Dockerfile
+      args:
+        # Vacío mientras la API no esté publicada (se publica con SCRUM-16/18)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    container_name: simo_frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   backup:
     image: postgres:18-alpine
     container_name: simo_backup

@@ -5,14 +5,16 @@ El servidor es la Mac del equipo. Todo corre en contenedores y el acceso desde i
 ```
                     Cloudflare (alejandrostore.com)
                      ├── db.alejandrostore.com   (TCP, protegido con Cloudflare Access)
+                     ├── app.alejandrostore.com  (frontend, protegido con Cloudflare Access)
                      └── api.alejandrostore.com  (HTTP, fase 2)
                                 │
                           túnel saliente
                                 │
 ┌─────────────────────── Mac (Docker) ─────────────────────────┐
 │  tunnel (cloudflared) ──► db  (PostgreSQL 18)  ◄── backup     │
-│                     └───► api (Node 22 / Express)             │
-│  Puertos solo en 127.0.0.1: 5432 (db), 3000 (api)             │
+│                     ├───► api (Node 22 / Express)             │
+│                     └───► frontend (Next.js)                  │
+│  Puertos solo en 127.0.0.1: 5432 db, 3000 api, 3001 frontend  │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -20,6 +22,7 @@ El servidor es la Mac del equipo. Todo corre en contenedores y el acceso desde i
 |---|---|
 | `db` | PostgreSQL 18. La primera vez ejecuta las migraciones de `backend/db` y crea el rol `simo_app` |
 | `api` | Backend Express. Se conecta como `simo_app` (sin permisos para alterar Kardex ni auditoría) |
+| `frontend` | Vista web (Next.js) compilada desde `simoapp/` con `deploy/frontend/Dockerfile`, sin cambios en su código |
 | `backup` | `pg_dump` diario a `deploy/backups/`, conserva 14 días (RNF-05) |
 | `tunnel` | Conector de Cloudflare; publica los servicios según lo configurado en el panel |
 
@@ -41,7 +44,8 @@ En [one.dash.cloudflare.com](https://one.dash.cloudflare.com) (Zero Trust):
    - Domain: `db.alejandrostore.com`
    - Policy **Allow** → Include → *Emails*: los correos de los 5 integrantes
    - Método de inicio de sesión: *One-time PIN* (código al correo)
-4. **Fase 2 — API** (cuando existan el login y el middleware de roles, SCRUM-16 / SCRUM-18): agregar el hostname `api` → Service **HTTP** → `api:3000`. Antes de eso **no se publica**, porque `GET /api/users` todavía no exige token y expondría la lista de usuarios.
+4. **Publicar el frontend:** aplicación de Access para `app.alejandrostore.com` con la misma política del equipo, y en el túnel el hostname `app` → Service **HTTP** → `frontend:3001`. Mientras el login del frontend sea simulado (acepta cualquier credencial), debe seguir detrás de Access.
+5. **Fase 2 — API** (cuando existan el login y el middleware de roles, SCRUM-16 / SCRUM-18): agregar el hostname `api` → Service **HTTP** → `api:3000`. Antes de eso **no se publica**, porque `GET /api/users` todavía no exige token y expondría la lista de usuarios.
 
 ## 3. Primer arranque
 
@@ -88,10 +92,10 @@ Ver registros de un servicio (`db`, `api`, `backup`, `tunnel`):
 docker compose logs -f api
 ```
 
-Actualizar la API después de un `git pull`:
+Actualizar la API o el frontend después de un `git pull`:
 
 ```bash
-docker compose up -d --build api
+docker compose up -d --build api frontend
 ```
 
 Respaldo manual inmediato:

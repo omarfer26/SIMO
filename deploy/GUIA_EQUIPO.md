@@ -1,5 +1,7 @@
 # Conectarse a la base de datos compartida de SIMO
 
+> **Ver la aplicación web:** entra a <https://app.alejandrostore.com> con tu correo de la UFPS (te llega un código). No necesitas instalar nada. El login de la aplicación todavía es simulado: cualquier dato te deja entrar y los datos que ves son de ejemplo.
+
 La base de datos del proyecto corre en un servidor del equipo y se publica por Cloudflare en `db.alejandrostore.com`. Solo pueden entrar los correos autorizados. Esta guía se hace una sola vez por computador.
 
 ## 1. Instalar cloudflared
