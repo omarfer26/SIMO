@@ -128,3 +128,30 @@ JSON
   "stock_minimo_bodega": 10,
   "stock_minimo_almacen": 5
 }
+
+## 👤 Endpoints de Usuarios (SCRUM-22, SCRUM-23)
+
+> Pendiente de protección con JWT + rol `ADMIN` (SCRUM-16 / SCRUM-18).
+
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| POST | `/api/users` | Crea un usuario. Body: `id_rol`, `nombre_completo`, `correo`, `usuario`, `password` (mín. 8) |
+| GET | `/api/users` | Lista paginada. Query opcional: `page`, `limit` (1-100, por defecto 10), `estado` (`true`/`false`), `id_rol`, `rol` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`), `q` (busca en nombre, correo o usuario) |
+| GET | `/api/users/:id` | Detalle de un usuario |
+
+Ejemplo: `GET /api/users?rol=VENDEDOR&estado=true&page=1&limit=10`
+
+```json
+{
+  "data": [
+    { "id_usuario": 4, "nombre_completo": "Vendedor SIMO", "correo": "vendedor@simo.local", "usuario": "vendedor",
+      "estado": true, "id_rol": 4, "rol_codigo": "VENDEDOR", "rol_nombre": "Vendedor",
+      "bloqueado_hasta": null, "ultimo_acceso": null, "creado_en": "...", "actualizado_en": "..." }
+  ],
+  "pagination": { "page": 1, "limit": 10, "total": 1, "totalPages": 1 }
+}
+```
+
+Errores: `400` parámetros inválidos, `404` usuario inexistente, `409` correo o usuario duplicado. Formato: `{ "error": "Bad Request", "message": "..." }`. La contraseña nunca se devuelve.
+
+**Pruebas automáticas** (requieren la base creada con el seed): `npm test`

@@ -1,23 +1,18 @@
 // index.js
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
+const pool = require('./src/config/db'); // Conexión a PostgreSQL usando variables de entorno
+const usuariosRoutes = require('./src/routes/usuarios.routes');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuración de la conexión a PostgreSQL usando variables de entorno
-const pool = new Pool({
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT,
-});
-
 // Middlewares
 app.use(cors());
 app.use(express.json()); // Permite a Express leer el cuerpo (body) de las peticiones en formato JSON
+
+// Módulo de usuarios (SCRUM-22, SCRUM-23)
+app.use('/api/users', usuariosRoutes);
 
 // =====================================================================
 // ENDPOINT: POST /api/products (Tarea SCRUM-33)
