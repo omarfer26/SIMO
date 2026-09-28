@@ -38,7 +38,8 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     
-    router.push("/login");
+    // Usamos window.location.href en lugar de router.push para limpiar caché del router
+    window.location.href = "/login";
   };
 
   return (

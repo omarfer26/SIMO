@@ -15,7 +15,10 @@ export default function LoginPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     
-    router.push("/catalogo");
+    // Usamos window.location.href en lugar de router.push()
+    // Esto fuerza al navegador a hacer una petición real al servidor,
+    // limpiando la caché de Next.js que podría recordar la ruta como "bloqueada".
+    window.location.href = "/";
   };
 
   return (
