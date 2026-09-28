@@ -17,7 +17,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-10 shadow-lg dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
         <div>
           <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-            Ingreso a SIMO
+            SIMO
           </h2>
           <p className="mt-2 text-center text-sm text-zinc-600 dark:text-zinc-400">
             Por favor inicia sesión con tu cuenta
