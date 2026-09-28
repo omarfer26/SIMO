@@ -62,7 +62,7 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
         stock_minimo_bodega: datos.stockMinimo
       };
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
       const res = await fetch(`${apiUrl}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
