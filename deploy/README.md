@@ -3,9 +3,9 @@
 El servidor es la Mac del equipo. Todo corre en contenedores y el acceso desde internet entra solo por un túnel de Cloudflare: no se abren puertos en el router ni se expone la IP de la casa.
 
 ```
-                    Cloudflare (dominio del equipo)
-                     ├── db.DOMINIO   (TCP, protegido con Cloudflare Access)
-                     └── api.DOMINIO  (HTTP, fase 2)
+                    Cloudflare (alejandrostore.com)
+                     ├── db.alejandrostore.com   (TCP, protegido con Cloudflare Access)
+                     └── api.alejandrostore.com  (HTTP, fase 2)
                                 │
                           túnel saliente
                                 │
@@ -38,7 +38,7 @@ En [one.dash.cloudflare.com](https://one.dash.cloudflare.com) (Zero Trust):
    - Subdomain `db`, dominio del equipo
    - Service **TCP** → `db:5432`
 3. **Proteger la base con Access:** *Access → Applications → Add → Self-hosted*:
-   - Domain: `db.DOMINIO`
+   - Domain: `db.alejandrostore.com`
    - Policy **Allow** → Include → *Emails*: los correos de los 5 integrantes
    - Método de inicio de sesión: *One-time PIN* (código al correo)
 4. **Fase 2 — API** (cuando existan el login y el middleware de roles, SCRUM-16 / SCRUM-18): agregar el hostname `api` → Service **HTTP** → `api:3000`. Antes de eso **no se publica**, porque `GET /api/users` todavía no exige token y expondría la lista de usuarios.

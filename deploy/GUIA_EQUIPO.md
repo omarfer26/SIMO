@@ -1,6 +1,6 @@
 # Conectarse a la base de datos compartida de SIMO
 
-La base de datos del proyecto corre en un servidor del equipo y se publica por Cloudflare en `db.DOMINIO`. Solo pueden entrar los correos autorizados. Esta guía se hace una sola vez por computador.
+La base de datos del proyecto corre en un servidor del equipo y se publica por Cloudflare en `db.alejandrostore.com`. Solo pueden entrar los correos autorizados. Esta guía se hace una sola vez por computador.
 
 ## 1. Instalar cloudflared
 
@@ -19,7 +19,7 @@ La base de datos del proyecto corre en un servidor del equipo y se publica por C
 Cada vez que quieras trabajar con la base, deja abierta una terminal con:
 
 ```bash
-cloudflared access tcp --hostname db.DOMINIO --url localhost:15432
+cloudflared access tcp --hostname db.alejandrostore.com --url localhost:15432
 ```
 
 La primera vez se abre el navegador: escribe tu correo (el que está autorizado en el proyecto) e ingresa el código que te llega. Mientras esa terminal siga abierta, la base está disponible en tu computador en `localhost:15432`.
