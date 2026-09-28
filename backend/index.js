@@ -27,12 +27,14 @@ app.post('/api/products', async (req, res) => {
         // 1. Extraer los datos enviados en el cuerpo de la petición (req.body)
         const {
             id_categoria,
-            codigo_barras,
+            id_unidad,
+            sku,
             nombre,
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo
+            stock_minimo_bodega,
+            stock_minimo_almacen
         } = req.body;
 
         // 2. Validación de Negocio (Requisito de la Tarea):
@@ -45,10 +47,10 @@ app.post('/api/products', async (req, res) => {
         }
 
         // Validación extra para evitar errores comunes
-        if (!id_categoria || !nombre || !precio_compra || !precio_venta) {
+        if (!id_categoria || !id_unidad || !sku || !nombre || !precio_compra || !precio_venta) {
             return res.status(400).json({
                 error: "Bad Request",
-                message: "Faltan campos obligatorios (id_categoria, nombre, precio_compra, precio_venta)."
+                message: "Faltan campos obligatorios (id_categoria, id_unidad, sku, nombre, precio_compra, precio_venta)."
             });
         }
 
@@ -56,19 +58,22 @@ app.post('/api/products', async (req, res) => {
         // Usamos $1, $2, etc., para evitar inyecciones SQL (Consultas Parametrizadas)
         const insertQuery = `
       INSERT INTO productos 
-      (id_categoria, codigo_barras, nombre, descripcion, precio_compra, precio_venta, stock_minimo)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      (id_categoria, id_unidad, sku, nombre, descripcion, precio_compra, precio_venta,
+       stock_minimo_bodega, stock_minimo_almacen)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *; -- Esto hace que PostgreSQL devuelva el registro recién insertado
     `;
 
         const values = [
             id_categoria,
-            codigo_barras,
+            id_unidad,
+            sku,
             nombre,
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo || 5 // Por defecto 5 si no lo envían, acorde a nuestra DB
+            stock_minimo_bodega || 0, // Por defecto 0 si no lo envían, acorde a nuestra DB
+            stock_minimo_almacen || 0
         ];
 
         // 4. Ejecutar la consulta en la Base de Datos
@@ -88,7 +93,7 @@ app.post('/api/products', async (req, res) => {
         if (error.code === '23505') {
             return res.status(409).json({
                 error: "Conflict",
-                message: "Ya existe un producto con ese código de barras."
+                message: "El código SKU ya está registrado."
             });
         }
 
@@ -96,7 +101,7 @@ app.post('/api/products', async (req, res) => {
         if (error.code === '23503') {
             return res.status(400).json({
                 error: "Bad Request",
-                message: "El id_categoria proporcionado no existe en la base de datos."
+                message: "El id_categoria o id_unidad proporcionado no existe en la base de datos."
             });
         }
 
