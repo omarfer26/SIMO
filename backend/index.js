@@ -3,24 +3,25 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-
 const app = express();
 const port = process.env.PORT || 3000;
-
-// Configuración de la conexión a PostgreSQL usando variables de entorno
-const pool = new Pool({
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT,
-});
 
 // Middlewares
 app.use(cors());
 app.use(express.json()); // Permite a Express leer el cuerpo (body) de las peticiones en formato JSON
+
+// Estado del servicio: lo usan Docker (healthcheck) y el monitoreo del despliegue
+app.get('/api/health', async (req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        res.json({ status: 'ok', database: 'ok' });
+    } catch (error) {
+        res.status(503).json({ status: 'error', database: 'unavailable' });
+    }
+});
+
+// Módulo de usuarios (SCRUM-22, SCRUM-23)
+app.use('/api/users', usuariosRoutes);
 
 // =====================================================================
 // ENDPOINT 1: POST /api/products (Tarea SCRUM-33)
@@ -30,12 +31,14 @@ app.post('/api/products', async (req, res) => {
     try {
         const {
             id_categoria,
-            codigo_barras,
+            id_unidad,
+            sku,
             nombre,
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo
+            stock_minimo_bodega,
+            stock_minimo_almacen
         } = req.body;
 
         // Validación de Negocio
@@ -46,28 +49,30 @@ app.post('/api/products', async (req, res) => {
             });
         }
 
+        // Validación extra para evitar errores comunes
         if (!id_categoria || !nombre || !precio_compra || !precio_venta) {
             return res.status(400).json({
                 error: "Bad Request",
-                message: "Faltan campos obligatorios (id_categoria, nombre, precio_compra, precio_venta)."
+                message: "Faltan campos obligatorios (id_categoria, id_unidad, sku, nombre, precio_compra, precio_venta)."
             });
         }
 
         const insertQuery = `
-            INSERT INTO productos 
-            (id_categoria, codigo_barras, nombre, descripcion, precio_compra, precio_venta, stock_minimo)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING *;
-        `;
+      INSERT INTO productos 
+      (id_categoria, codigo_barras, nombre, descripcion, precio_compra, precio_venta, stock_minimo)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *; -- Esto hace que PostgreSQL devuelva el registro recién insertado
+    `;
 
         const values = [
             id_categoria,
-            codigo_barras,
+            id_unidad,
+            sku,
             nombre,
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo || 5
+            stock_minimo || 5 // Por defecto 5 si no lo envían, acorde a nuestra DB
         ];
 
         const result = await pool.query(insertQuery, values);
@@ -84,14 +89,14 @@ app.post('/api/products', async (req, res) => {
         if (error.code === '23505') {
             return res.status(409).json({
                 error: "Conflict",
-                message: "Ya existe un producto con ese código de barras."
+                message: "El código SKU ya está registrado."
             });
         }
 
         if (error.code === '23503') {
             return res.status(400).json({
                 error: "Bad Request",
-                message: "El id_categoria proporcionado no existe en la base de datos."
+                message: "El id_categoria o id_unidad proporcionado no existe en la base de datos."
             });
         }
 

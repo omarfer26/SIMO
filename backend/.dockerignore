@@ -1,3 +1,9 @@
 node_modules
 npm-debug.log
 .env
+.git
+db
+tests
+scripts
+*.md
+docker-compose*.yml

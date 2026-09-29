@@ -8,26 +8,30 @@ services:
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-root}
-      POSTGRES_DB: ${DB_NAME:-inventario_db}
+      POSTGRES_DB: ${DB_NAME:-simo_retail}
+      SIMO_SEED: ${SIMO_SEED:-true}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
+      # PostgreSQL 18+ guarda los datos en /var/lib/postgresql/18/docker:
+      # el volumen se monta en /var/lib/postgresql (no en .../data).
       - pgdata:/var/lib/postgresql
+      # Migraciones y datos de desarrollo (db/00_init.sh). Solo se ejecutan
+      # cuando el volumen está vacío; para recrear: docker compose down -v
+      - ./db:/docker-entrypoint-initdb.d:ro
 
   app:
     build: .
     container_name: retail_backend
     restart: always
     ports:
-      - "3000:3000"
-    env_file:
-      - .env
+      - "127.0.0.1:3000:3000"
     environment:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-root}
       - DB_HOST=db
       - DB_PORT=5432
-      - DB_NAME=${DB_NAME:-inventario_db}
+      - DB_NAME=${DB_NAME:-simo_retail}
       - PORT=3000
     depends_on:
       - db
