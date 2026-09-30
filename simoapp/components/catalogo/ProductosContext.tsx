@@ -19,7 +19,7 @@ type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "estado">;
 
 interface ProductosContextValue {
   productos: Producto[];
-  agregarProducto: (datos: ProductoNuevo) => void;
+  agregarProducto: (datos: ProductoNuevo) => Promise<void>;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -27,18 +27,72 @@ const ProductosContext = createContext<ProductosContextValue | null>(null);
 export function ProductosProvider({ children }: { children: ReactNode }) {
   const [productos, setProductos] = useState<Producto[]>(productosMock);
 
-  function agregarProducto(datos: ProductoNuevo) {
-    setProductos((actuales) => [
-      ...actuales,
-      {
-        ...datos,
-        id: Math.max(0, ...actuales.map((p) => p.id)) + 1,
-        // Un producto recién creado todavía no tiene movimientos en el
-        // Kardex, así que arranca sin stock y activo por defecto.
-        stockActual: 0,
-        estado: "Activo",
-      },
-    ]);
+  async function agregarProducto(datos: ProductoNuevo) {
+    try {
+      const categoryMap: Record<string, number> = {
+        "Electrónica": 1,
+        "Ropa": 2,
+        "Ferretería": 3,
+        "Papelería": 4,
+        "Hogar": 5
+      };
+
+      // (Camilo) — IDs de la tabla `unidades_medida` del esquema de Ramón
+      // (003_catalogo.sql). El formulario tiene la unidad como texto libre,
+      // así que se aceptan nombre y abreviatura; si no coincide, "Unidad".
+      const unitMap: Record<string, number> = {
+        "unidad": 1, "und": 1,
+        "kilogramo": 2, "kg": 2,
+        "gramo": 3, "g": 3,
+        "litro": 4, "litros": 4, "l": 4
+      };
+
+      // (Camilo) — Nombres de campos alineados con el POST /api/products de
+      // la rama back-end (sku, id_unidad, stock mínimo por bodega/almacén).
+      // El formulario tiene un solo stock mínimo: se envía como el de bodega
+      // y el de almacén queda en 0 (valor por defecto del backend).
+      const payload = {
+        id_categoria: categoryMap[datos.categoria] || 1,
+        id_unidad: unitMap[datos.unidadMedida.trim().toLowerCase()] || 1,
+        sku: datos.codigo,
+        nombre: datos.nombre,
+        descripcion: datos.descripcion,
+        precio_compra: datos.precioCompra,
+        precio_venta: datos.precioVenta,
+        stock_minimo_bodega: datos.stockMinimo
+      };
+
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+      const res = await fetch(`${apiUrl}/products`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.error("Error from backend:", errorData);
+        alert(`Error: ${errorData.message}`);
+        return;
+      }
+
+      const { producto } = await res.json();
+
+      setProductos((actuales) => [
+        ...actuales,
+        {
+          ...datos,
+          id: producto.id_producto,
+          codigo: producto.sku,
+          // stock_total es NUMERIC en PostgreSQL y llega como texto ("0.000")
+          stockActual: Number(producto.stock_total),
+          estado: producto.estado ? "Activo" : "Inactivo",
+        },
+      ]);
+    } catch (error) {
+      console.error("Error conectando al backend", error);
+      alert("Error conectando al backend");
+    }
   }
 
   return (
