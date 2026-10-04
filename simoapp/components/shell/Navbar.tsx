@@ -29,17 +29,9 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
   const router = useRouter();
 
   const handleLogout = () => {
-    setMenuUsuarioAbierto(false);
-    // Borrar cookies estableciendo expiración en el pasado
-    document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-    
-    // Opcional, limpiar localStorage también por si acaso
     localStorage.removeItem("token");
     localStorage.removeItem("role");
-    
-    // Usamos window.location.href en lugar de router.push para limpiar caché del router
-    window.location.href = "/login";
+    router.replace("/login");
   };
 
   return (
