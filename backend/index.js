@@ -1,10 +1,14 @@
-// index.js
+// index.js (Parte superior)
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
+const bcrypt = require('bcrypt'); // Requerido para el punto 1 y 2
+const jwt = require('jsonwebtoken'); // Requerido para el punto 1
+const pool = require('./db'); // Requerido para el punto 1 (ajusta la ruta según tu proyecto)
+const usuariosRoutes = require('./routes/usuariosRoutes'); // Requerido para el punto 1
 
 const app = express();
-const port = process.env.PORT || 3000;
+// Cambiamos el puerto al 3001 para liberar el 3000 que usa Next.js
+const port = process.env.PORT || 3001;
 
 // Middlewares
 app.use(cors());
@@ -448,3 +452,5 @@ app.post('/api/auth/logout', async (req, res) => {
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
 });
+
+app.use('/api/users', usuariosRoutes);

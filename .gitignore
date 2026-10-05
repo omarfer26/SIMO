@@ -12,6 +12,7 @@ backend/.env
 backend/node_modules/
 simoapp/.env
 simoapp/node_modules/
+simoapp/.next/
 
 # Despliegue: secretos y respaldos de la base de datos
 deploy/.env
