@@ -10,7 +10,6 @@
 //    la combinación de filtros elegida.
 
 import { useMemo, useState } from "react";
-import { productosMock } from "./productos.mock";
 import type {
   FiltroCategoria,
   FiltroDisponibilidad,
@@ -25,16 +24,14 @@ const formatoMoneda = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
-// El backend aún no expone /productos: por eso `productos` tiene un valor
-// por defecto (los datos de prueba) pero se puede pasar por props cuando
-// exista el fetch real, sin tocar la lógica de filtrado de este componente.
+// SCRUM-catalogoBD (Camilo) — `productos` ahora es obligatorio: la lista la
+// entrega la página, que la lee del ProductosContext (y este, del backend).
+// Antes tenía los datos de prueba como valor por defecto.
 interface BusquedaCatalogoProps {
-  productos?: Producto[];
+  productos: Producto[];
 }
 
-export default function BusquedaCatalogo({
-  productos = productosMock,
-}: BusquedaCatalogoProps) {
+export default function BusquedaCatalogo({ productos }: BusquedaCatalogoProps) {
   const [texto, setTexto] = useState("");
   const [categoria, setCategoria] = useState<FiltroCategoria>("todas");
   const [disponibilidad, setDisponibilidad] =
