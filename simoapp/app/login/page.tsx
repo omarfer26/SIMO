@@ -6,10 +6,19 @@ export default function LoginPage() {
   const router = useRouter();
 
   const handleLogin = () => {
-    // Simula el login guardando un token y un rol (por defecto ADMIN para pruebas)
-    localStorage.setItem("token", "fake-jwt-token-123");
-    localStorage.setItem("role", "ADMIN");
-    router.push("/catalogo");
+    // Simula el login guardando un token y un rol en Cookies
+    const expires = new Date(Date.now() + 86400 * 1000).toUTCString();
+    document.cookie = `token=fake-jwt-token-123; path=/; expires=${expires}`;
+    document.cookie = `role=ADMIN; path=/; expires=${expires}`;
+    
+    // Limpiamos localStorage por si quedaron datos viejos de sesiones previas
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    
+    // Usamos window.location.href en lugar de router.push()
+    // Esto fuerza al navegador a hacer una petición real al servidor,
+    // limpiando la caché de Next.js que podría recordar la ruta como "bloqueada".
+    window.location.href = "/";
   };
 
   return (
@@ -17,7 +26,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-10 shadow-lg dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
         <div>
           <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-            Ingreso a SIMO
+            SIMO
           </h2>
           <p className="mt-2 text-center text-sm text-zinc-600 dark:text-zinc-400">
             Por favor inicia sesión con tu cuenta
