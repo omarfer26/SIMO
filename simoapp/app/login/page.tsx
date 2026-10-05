@@ -1,53 +1,121 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+// SCRUM-loginMejora (Camilo) — Pantalla de inicio de sesión. Antes cualquier clic en
+// "Ingresar" dejaba entrar como ADMIN sin revisar nada. Ahora:
+//  1. Valida correo y contraseña en el navegador (lib/auth/validaciones.ts)
+//     y muestra el error debajo de cada campo.
+//  2. Envía las credenciales por lib/auth/authService.ts (API real o mock).
+//  3. Si el backend responde con error, muestra un mensaje general arriba
+//     del formulario (credenciales incorrectas, cuenta inactiva, servidor
+//     caído...).
+//  4. Mientras espera la respuesta, bloquea los campos y el botón para que
+//     no se envíe dos veces.
+
+import { useState, type SubmitEvent } from "react";
+import Button from "@/components/ui/Button";
+import InputText from "@/components/ui/InputText";
+import { Spinner } from "@/components/ui/Spinner";
+import { iniciarSesion, mensajeDeError } from "@/lib/auth/authService";
+import { guardarSesion } from "@/lib/auth/sesion";
+import type { CredencialesLogin } from "@/lib/auth/tipos";
+import { validarLogin, type Errores } from "@/lib/auth/validaciones";
 
 export default function LoginPage() {
-  const router = useRouter();
+  const [datos, setDatos] = useState<CredencialesLogin>({ correo: "", password: "" });
+  const [errores, setErrores] = useState<Errores<keyof CredencialesLogin>>({});
+  const [errorGeneral, setErrorGeneral] = useState("");
+  const [enviando, setEnviando] = useState(false);
 
-  const handleLogin = () => {
-    // Simula el login guardando un token y un rol en Cookies
-    const expires = new Date(Date.now() + 86400 * 1000).toUTCString();
-    document.cookie = `token=fake-jwt-token-123; path=/; expires=${expires}`;
-    document.cookie = `role=ADMIN; path=/; expires=${expires}`;
-    
-    // Limpiamos localStorage por si quedaron datos viejos de sesiones previas
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    
-    // Usamos window.location.href en lugar de router.push()
-    // Esto fuerza al navegador a hacer una petición real al servidor,
-    // limpiando la caché de Next.js que podría recordar la ruta como "bloqueada".
-    window.location.href = "/";
+  // Al corregir un campo se borra su mensaje de error (y el general), para
+  // que el usuario no siga viendo un error que ya está arreglando.
+  const cambiar = (campo: keyof CredencialesLogin, valor: string) => {
+    setDatos((previo) => ({ ...previo, [campo]: valor }));
+    setErrores((previo) => ({ ...previo, [campo]: undefined }));
+    setErrorGeneral("");
+  };
+
+  const handleSubmit = async (evento: SubmitEvent<HTMLFormElement>) => {
+    evento.preventDefault();
+    if (enviando) return;
+
+    const erroresEncontrados = validarLogin(datos);
+    setErrores(erroresEncontrados);
+    setErrorGeneral("");
+    if (Object.keys(erroresEncontrados).length > 0) return;
+
+    setEnviando(true);
+    try {
+      const sesion = await iniciarSesion(datos);
+      guardarSesion(sesion);
+      // Usamos window.location.href en lugar de router.push(): fuerza una
+      // petición real al servidor para que middleware.ts vea la cookie nueva.
+      // No se apaga `enviando`: el botón sigue bloqueado hasta que cambia la
+      // página.
+      window.location.href = "/";
+    } catch (error) {
+      setErrorGeneral(mensajeDeError(error));
+      setEnviando(false);
+    }
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4">
-      <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-10 shadow-lg dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+    <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-zinc-950">
+      <div className="w-full max-w-md space-y-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 sm:p-10">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <h1 className="text-center text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
             SIMO
-          </h2>
+          </h1>
           <p className="mt-2 text-center text-sm text-zinc-600 dark:text-zinc-400">
             Por favor inicia sesión con tu cuenta
           </p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={(e) => { e.preventDefault(); handleLogin(); }}>
-          <div className="-space-y-px rounded-md shadow-sm">
-            <div>
-              <label htmlFor="email-address" className="sr-only">Correo electrónico</label>
-              <input id="email-address" name="email" type="email" autoComplete="email" required className="relative block w-full rounded-t-md border-0 py-2.5 px-3 text-zinc-900 ring-1 ring-inset ring-zinc-300 placeholder:text-zinc-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-emerald-600 sm:text-sm sm:leading-6 dark:bg-zinc-800 dark:text-zinc-100 dark:ring-zinc-700" placeholder="Correo electrónico" />
-            </div>
-            <div>
-              <label htmlFor="password" className="sr-only">Contraseña</label>
-              <input id="password" name="password" type="password" autoComplete="current-password" required className="relative block w-full rounded-b-md border-0 py-2.5 px-3 text-zinc-900 ring-1 ring-inset ring-zinc-300 placeholder:text-zinc-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-emerald-600 sm:text-sm sm:leading-6 dark:bg-zinc-800 dark:text-zinc-100 dark:ring-zinc-700" placeholder="Contraseña" />
-            </div>
-          </div>
-          <div>
-            <button type="submit" className="group relative flex w-full justify-center rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600">
-              Ingresar
-            </button>
-          </div>
+
+        {/* noValidate apaga los globos de error del navegador para mostrar
+            los nuestros, debajo de cada campo y en español. */}
+        <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+          {errorGeneral && (
+            <p
+              role="alert"
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+            >
+              {errorGeneral}
+            </p>
+          )}
+
+          <InputText
+            label="Correo electrónico"
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="nombre@empresa.com"
+            required
+            disabled={enviando}
+            value={datos.correo}
+            onChange={(e) => cambiar("correo", e.target.value)}
+            error={errores.correo}
+          />
+          <InputText
+            label="Contraseña"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            disabled={enviando}
+            value={datos.password}
+            onChange={(e) => cambiar("password", e.target.value)}
+            error={errores.password}
+          />
+
+          <Button type="submit" className="w-full" disabled={enviando}>
+            {enviando ? (
+              <>
+                <Spinner size="sm" color="white" />
+                Ingresando...
+              </>
+            ) : (
+              "Ingresar"
+            )}
+          </Button>
         </form>
       </div>
     </main>

@@ -94,8 +94,10 @@ export function Modal({
         }`}
       >
         {/* Header */}
-        {(title || onClose) && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+        {/* SCRUM-loginMejora (Camilo) — Se quitó la condición `(title || onClose) &&`:
+            onClose es obligatorio, así que siempre era verdadera y TypeScript
+            la marcaba como error (el proyecto no compilaba). */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
             {title ? (
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white" id="modal-title">
                 {title}
@@ -110,8 +112,7 @@ export function Modal({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-          </div>
-        )}
+        </div>
 
         {/* Body */}
         <div className="px-6 py-4 overflow-y-auto max-h-[calc(100vh-16rem)]">
