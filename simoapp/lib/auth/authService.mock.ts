@@ -14,11 +14,11 @@ import {
   type DatosNuevoUsuario,
   type SesionIniciada,
   type UsuarioCreado,
+  type UsuarioListado,
 } from "./tipos";
 
-interface UsuarioMock extends UsuarioCreado {
+interface UsuarioMock extends UsuarioListado {
   password: string;
-  activo: boolean;
 }
 
 const CLAVE_STORAGE = "simo.mock.usuarios";
@@ -88,6 +88,19 @@ export async function iniciarSesionMock(
     token: `mock.${btoa(`${usuario.id}:${usuario.rol}:${Date.now()}`)}`,
     usuario: { id: usuario.id, correo: usuario.correo, rol: usuario.rol },
   };
+}
+
+export async function listarUsuariosMock(): Promise<UsuarioListado[]> {
+  await esperar();
+  // Se copia campo por campo para que la contraseña no salga del mock.
+  return leerUsuarios().map((u) => ({
+    id: u.id,
+    nombreCompleto: u.nombreCompleto,
+    correo: u.correo,
+    usuario: u.usuario,
+    rol: u.rol,
+    activo: u.activo,
+  }));
 }
 
 export async function crearUsuarioMock(

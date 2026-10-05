@@ -41,6 +41,11 @@ export interface UsuarioCreado {
   rol: CodigoRol;
 }
 
+// Una fila de la tabla de /usuarios. Tampoco trae la contraseña.
+export interface UsuarioListado extends UsuarioCreado {
+  activo: boolean;
+}
+
 // Tipos de error que la pantalla sabe explicarle al usuario. Tanto la API
 // real como el mock terminan lanzando uno de estos, así los formularios no
 // necesitan saber de códigos HTTP.

@@ -15,7 +15,11 @@
 
 import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
-import { crearUsuarioMock, iniciarSesionMock } from "./authService.mock";
+import {
+  crearUsuarioMock,
+  iniciarSesionMock,
+  listarUsuariosMock,
+} from "./authService.mock";
 import {
   ErrorAuth,
   type CodigoRol,
@@ -24,6 +28,7 @@ import {
   type SesionIniciada,
   type TipoErrorAuth,
   type UsuarioCreado,
+  type UsuarioListado,
 } from "./tipos";
 
 const USAR_MOCK = process.env.NEXT_PUBLIC_AUTH_MOCK !== "false";
@@ -111,6 +116,38 @@ export async function crearUsuario(
       403: "sin_permiso",
       409: "duplicado",
     });
+  }
+}
+
+// Forma de cada usuario en la respuesta de GET /api/users (rama back-end).
+interface UsuarioApi {
+  id_usuario: number;
+  nombre_completo: string;
+  correo: string;
+  usuario: string;
+  estado: boolean;
+  rol_codigo: CodigoRol;
+}
+
+// Lista de usuarios para la tabla de /usuarios. El backend entrega máximo
+// 100 por petición; se pide esa primera página completa y la tabla pagina
+// en el navegador. Si algún día hay más de 100 usuarios, habrá que pedir
+// las páginas siguientes (la respuesta trae `pagination.totalPages`).
+export async function listarUsuarios(): Promise<UsuarioListado[]> {
+  if (USAR_MOCK) return listarUsuariosMock();
+
+  try {
+    const { data } = await apiClient.get("/users", { params: { limit: 100 } });
+    return (data.data as UsuarioApi[]).map((u) => ({
+      id: u.id_usuario,
+      nombreCompleto: u.nombre_completo,
+      correo: u.correo,
+      usuario: u.usuario,
+      rol: u.rol_codigo,
+      activo: u.estado,
+    }));
+  } catch (error) {
+    throw aErrorAuth(error, { 401: "sin_permiso", 403: "sin_permiso" });
   }
 }
 
