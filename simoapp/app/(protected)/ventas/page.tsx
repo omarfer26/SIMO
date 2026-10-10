@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 import type { Producto } from "@/components/catalogo/tipos";
 import InputText from "@/components/ui/InputText";
@@ -15,6 +15,12 @@ export default function VentasPage() {
   const { productos } = useProductos();
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
+  const [alerta, setAlerta] = useState<string | null>(null);
+
+  const mostrarAlerta = (mensaje: string) => {
+    setAlerta(mensaje);
+    setTimeout(() => setAlerta(null), 3000);
+  };
 
   // 1. Buscador Predictivo (Filtra por nombre o SKU)
   const productosFiltrados = productos.filter((p) => {
@@ -26,27 +32,29 @@ export default function VentasPage() {
     );
   });
 
+  const getStockDisponible = (producto: Producto) => {
+    const enCanasta = canasta.find((item) => item.producto.id === producto.id)?.cantidad || 0;
+    return producto.stockActual - enCanasta;
+  };
+
   // 2. Funciones de Canasta
   const agregarProducto = (producto: Producto) => {
+    const stockDisponible = getStockDisponible(producto);
+
+    if (stockDisponible <= 0) {
+      mostrarAlerta(`¡Agotado! No hay más unidades disponibles de ${producto.nombre}`);
+      return;
+    }
+
     setCanasta((prev) => {
       const existe = prev.find((item) => item.producto.id === producto.id);
       
       if (existe) {
-        // Validación de Stock
-        if (existe.cantidad + 1 > producto.stockActual) {
-          alert(`¡Stock insuficiente! Solo hay ${producto.stockActual} unidades de ${producto.nombre}`);
-          return prev;
-        }
         return prev.map((item) =>
           item.producto.id === producto.id
             ? { ...item, cantidad: item.cantidad + 1 }
             : item
         );
-      }
-
-      if (producto.stockActual < 1) {
-        alert("Este producto está agotado.");
-        return prev;
       }
       
       return [...prev, { producto, cantidad: 1 }];
@@ -59,7 +67,7 @@ export default function VentasPage() {
         if (item.producto.id === id) {
           const nuevaCantidad = item.cantidad + delta;
           if (nuevaCantidad > item.producto.stockActual) {
-            alert(`Stock insuficiente. Solo quedan ${item.producto.stockActual}`);
+            mostrarAlerta(`Stock insuficiente. Solo quedan ${item.producto.stockActual} en total.`);
             return item;
           }
           if (nuevaCantidad < 1) return item; // Para eliminar, se usa otra función
@@ -81,7 +89,19 @@ export default function VentasPage() {
   );
 
   return (
-    <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
+    <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8 relative">
+      {/* Toast Notification */}
+      {alerta && (
+        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
+          <div className="bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-red-700">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span className="font-medium text-sm">{alerta}</span>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
           Punto de Venta (POS)
@@ -106,49 +126,54 @@ export default function VentasPage() {
             {productosFiltrados.length === 0 ? (
               <p className="text-sm text-zinc-500 col-span-2 py-4">No se encontraron productos.</p>
             ) : (
-              productosFiltrados.map((prod) => (
-                <div
-                  key={prod.id}
-                  className={`flex flex-col justify-between rounded-lg border p-4 shadow-sm transition-colors
-                    ${
-                      prod.stockActual > 0
-                        ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-                        : "border-red-200 bg-red-50 opacity-80 dark:border-red-900 dark:bg-red-950/30"
-                    }
-                  `}
-                >
-                  <div>
-                    <div className="flex justify-between items-start">
-                      <span className="text-xs font-mono text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                        {prod.codigo}
-                      </span>
-                      <span
-                        className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                          prod.stockActual > 0
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
-                            : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
-                        }`}
-                      >
-                        Stock: {prod.stockActual}
-                      </span>
-                    </div>
-                    <h3 className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2">
-                      {prod.nombre}
-                    </h3>
-                    <p className="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                      ${prod.precioVenta.toLocaleString()}
-                    </p>
-                  </div>
-                  
-                  <Button
-                    className="mt-4 w-full"
-                    disabled={prod.stockActual === 0}
-                    onClick={() => agregarProducto(prod)}
+              productosFiltrados.map((prod) => {
+                const stockDisponible = getStockDisponible(prod);
+                const sinStock = stockDisponible <= 0;
+
+                return (
+                  <div
+                    key={prod.id}
+                    className={`flex flex-col justify-between rounded-lg border p-4 shadow-sm transition-colors
+                      ${
+                        !sinStock
+                          ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+                          : "border-red-300 bg-red-50/80 dark:border-red-900 dark:bg-red-950/30"
+                      }
+                    `}
                   >
-                    {prod.stockActual > 0 ? "Agregar a Canasta" : "Agotado"}
-                  </Button>
-                </div>
-              ))
+                    <div>
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-mono text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
+                          {prod.codigo}
+                        </span>
+                        <span
+                          className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                            !sinStock
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
+                              : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                          }`}
+                        >
+                          Stock Disp: {stockDisponible}
+                        </span>
+                      </div>
+                      <h3 className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2">
+                        {prod.nombre}
+                      </h3>
+                      <p className="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        ${prod.precioVenta.toLocaleString()}
+                      </p>
+                    </div>
+                    
+                    <Button
+                      className={`mt-4 w-full transition-all ${sinStock ? "opacity-75 bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 text-white cursor-not-allowed" : ""}`}
+                      disabled={sinStock}
+                      onClick={() => agregarProducto(prod)}
+                    >
+                      {!sinStock ? "Agregar a Canasta" : "Sin stock disponible"}
+                    </Button>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -167,51 +192,57 @@ export default function VentasPage() {
                   <p className="text-xs mt-1">Busca un producto y presiona Agregar</p>
                 </div>
               ) : (
-                canasta.map((item) => (
-                  <div key={item.producto.id} className="flex flex-col gap-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex justify-between items-start">
-                      <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100 leading-tight">
-                        {item.producto.nombre}
-                      </h4>
-                      <button
-                        onClick={() => eliminarDeCanasta(item.producto.id)}
-                        className="text-zinc-400 hover:text-red-600 transition-colors"
-                        title="Eliminar"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                    
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md">
+                canasta.map((item) => {
+                  const limiteAlcanzado = item.cantidad >= item.producto.stockActual;
+                  
+                  return (
+                    <div key={item.producto.id} className="flex flex-col gap-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                      <div className="flex justify-between items-start">
+                        <h4 className="text-sm font-medium text-zinc-900 dark:text-zinc-100 leading-tight">
+                          {item.producto.nombre}
+                        </h4>
                         <button
-                          className="px-2 py-1 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                          onClick={() => modificarCantidad(item.producto.id, -1)}
+                          onClick={() => eliminarDeCanasta(item.producto.id)}
+                          className="text-zinc-400 hover:text-red-600 transition-colors"
+                          title="Eliminar"
                         >
-                          -
-                        </button>
-                        <span className="text-sm font-medium w-8 text-center text-zinc-900 dark:text-zinc-100">
-                          {item.cantidad}
-                        </span>
-                        <button
-                          className="px-2 py-1 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                          onClick={() => modificarCantidad(item.producto.id, 1)}
-                        >
-                          +
+                          ✕
                         </button>
                       </div>
                       
-                      <div className="text-right">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                          ${item.producto.precioVenta.toLocaleString()} c/u
-                        </p>
-                        <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                          ${(item.producto.precioVenta * item.cantidad).toLocaleString()}
-                        </p>
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md">
+                          <button
+                            className="px-2 py-1 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                            onClick={() => modificarCantidad(item.producto.id, -1)}
+                          >
+                            -
+                          </button>
+                          <span className="text-sm font-medium w-8 text-center text-zinc-900 dark:text-zinc-100">
+                            {item.cantidad}
+                          </span>
+                          <button
+                            className={`px-2 py-1 transition-colors ${limiteAlcanzado ? "text-zinc-300 dark:text-zinc-600 cursor-not-allowed" : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+                            disabled={limiteAlcanzado}
+                            onClick={() => modificarCantidad(item.producto.id, 1)}
+                            title={limiteAlcanzado ? "Stock máximo alcanzado" : "Aumentar cantidad"}
+                          >
+                            +
+                          </button>
+                        </div>
+                        
+                        <div className="text-right">
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            ${item.producto.precioVenta.toLocaleString()} c/u
+                          </p>
+                          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                            ${(item.producto.precioVenta * item.cantidad).toLocaleString()}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -226,7 +257,7 @@ export default function VentasPage() {
                 className="w-full h-12 text-base shadow-sm"
                 disabled={canasta.length === 0}
                 onClick={() => {
-                  alert("Venta confirmada simulada exitosamente. Aquí iría la conexión al backend.");
+                  mostrarAlerta("Venta confirmada simulada exitosamente. (Conexión al backend pendiente)");
                   setCanasta([]);
                   setBusqueda("");
                 }}
@@ -240,3 +271,4 @@ export default function VentasPage() {
     </main>
   );
 }
+
