@@ -12,8 +12,19 @@
 //  - Se quitó el envoltorio <ProtectedRoute>: ese archivo se borró del
 //    proyecto y la página no compilaba. La protección "solo ADMIN" de esta
 //    ruta ya la hace middleware.ts.
+//
+// SCRUM-20 (Camilo) — Filtros por rol y por estado (Activo/Inactivo) arriba
+// de la tabla (components/usuarios/FiltrosUsuarios.tsx). Los dos se acumulan,
+// la tabla se actualiza apenas se elige una opción, y si ningún usuario
+// cumple la combinación sale un mensaje con el botón "Limpiar filtros".
 
 import { useEffect, useState } from "react";
+import FiltrosUsuarios, {
+  FILTROS_INICIALES,
+  filtrarUsuarios,
+  hayFiltrosActivos,
+  type FiltrosDeUsuarios,
+} from "@/components/usuarios/FiltrosUsuarios";
 import FormularioUsuario from "@/components/usuarios/FormularioUsuario";
 import { Badge } from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -96,6 +107,10 @@ export default function UsuariosPage() {
   const [lista, setLista] = useState<EstadoLista>({ tipo: "cargando" });
   // Cada vez que este número cambia, se vuelve a pedir la lista.
   const [recarga, setRecarga] = useState(0);
+  // SCRUM-20 — Qué rol y qué estado están elegidos en los filtros.
+  const [filtros, setFiltros] = useState<FiltrosDeUsuarios>(FILTROS_INICIALES);
+  const usuariosFiltrados =
+    lista.tipo === "lista" ? filtrarUsuarios(lista.usuarios, filtros) : [];
 
   useEffect(() => {
     // Si la página se cierra (o se pide otra recarga) antes de que llegue la
@@ -168,13 +183,35 @@ export default function UsuariosPage() {
           )}
 
           {lista.tipo === "lista" && (
-            <DataTable
-              columns={columnas}
-              data={lista.usuarios}
-              getRowKey={(u) => u.id}
-              caption="Lista de usuarios del sistema"
-              emptyMessage="Todavía no hay usuarios registrados."
-            />
+            <div className="flex flex-col gap-4">
+              <FiltrosUsuarios
+                filtros={filtros}
+                onCambiar={setFiltros}
+                mostrados={usuariosFiltrados.length}
+                total={lista.usuarios.length}
+              />
+              <DataTable
+                columns={columnas}
+                data={usuariosFiltrados}
+                getRowKey={(u) => u.id}
+                caption="Lista de usuarios del sistema"
+                emptyMessage={
+                  hayFiltrosActivos(filtros) ? (
+                    <span className="flex flex-col items-center gap-3">
+                      No hay usuarios con ese rol y estado.
+                      <Button
+                        variant="secondary"
+                        onClick={() => setFiltros(FILTROS_INICIALES)}
+                      >
+                        Limpiar filtros
+                      </Button>
+                    </span>
+                  ) : (
+                    "Todavía no hay usuarios registrados."
+                  )
+                }
+              />
+            </div>
           )}
         </div>
       </main>
