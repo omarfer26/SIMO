@@ -25,6 +25,19 @@ export function Modal({
   const [mounted, setMounted] = useState(false);
   const [show, setShow] = useState(false);
 
+  // SCRUM-21 (Camilo) — Mientras el modal se desvanece al cerrarse (300 ms),
+  // se sigue mostrando el último título y contenido que tuvo abierto. Antes
+  // la página quitaba el contenido apenas se cerraba y durante la animación
+  // se veía una ventana vacía. (Es el patrón de React de "guardar el valor
+  // anterior" en el estado; no entra en bucle porque solo cambia cuando
+  // cambian las props.)
+  const [ultimo, setUltimo] = useState({ title, children });
+  if (isOpen && (ultimo.title !== title || ultimo.children !== children)) {
+    setUltimo({ title, children });
+  }
+  const tituloVisible = isOpen ? title : ultimo.title;
+  const contenidoVisible = isOpen ? children : ultimo.children;
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -98,9 +111,9 @@ export function Modal({
             onClose es obligatorio, así que siempre era verdadera y TypeScript
             la marcaba como error (el proyecto no compilaba). */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-            {title ? (
+            {tituloVisible ? (
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white" id="modal-title">
-                {title}
+                {tituloVisible}
               </h3>
             ) : <div />}
             <button
@@ -116,7 +129,7 @@ export function Modal({
 
         {/* Body */}
         <div className="px-6 py-4 overflow-y-auto max-h-[calc(100vh-16rem)]">
-          {children}
+          {contenidoVisible}
         </div>
 
         {/* Footer */}
