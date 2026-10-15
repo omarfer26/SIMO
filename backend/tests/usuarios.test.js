@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const pool = require('../src/config/db');
 
 const PORT = process.env.TEST_PORT || 3999;
@@ -159,6 +159,29 @@ caso('POST valida campos, formato de correo, contraseña y rol (400)', async () 
     }
     const { body } = await api('', { method: 'POST', body: '{}' });
     assert.deepEqual(body.campos, ['id_rol', 'nombre_completo', 'correo', 'usuario', 'password']);
+});
+
+// ------------------- Contrato con el frontend (simoapp/lib/auth/authService.ts) -------------------
+
+caso('Contrato del frontend: POST devuelve usuario con id, nombre, correo, usuario y rol_codigo', async () => {
+    const datos = nuevoUsuario({ correo: `contrato${SUFIJO}@simo.local`, usuario: `contrato${SUFIJO}`, id_rol: 3 });
+    const { status, body } = await api('', { method: 'POST', body: JSON.stringify(datos) });
+    assert.equal(status, 201);
+    for (const campo of ['id_usuario', 'nombre_completo', 'correo', 'usuario', 'rol_codigo']) {
+        assert.ok(body.usuario[campo] !== undefined, `falta usuario.${campo}`);
+    }
+    assert.equal(body.usuario.rol_codigo, 'INVENTARIO');
+});
+
+caso('Contrato del frontend: GET ?limit=100 devuelve data[] con id, nombre, correo, usuario, estado y rol_codigo', async () => {
+    const { status, body } = await api('?limit=100');
+    assert.equal(status, 200);
+    assert.ok(Array.isArray(body.data) && body.pagination.totalPages >= 1);
+    for (const u of body.data) {
+        for (const campo of ['id_usuario', 'nombre_completo', 'correo', 'usuario', 'estado', 'rol_codigo']) {
+            assert.ok(u[campo] !== undefined, `falta ${campo}`);
+        }
+    }
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18

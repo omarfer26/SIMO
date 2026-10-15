@@ -1,7 +1,7 @@
 // src/controllers/usuarios.controller.js
 // RF-02: administrar usuarios (crear, consultar). Uso exclusivo del Administrador
 // (la protección con JWT + RBAC se activa en las rutas cuando exista SCRUM-16/18).
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const {
     buscarPorCorreoOUsuario,
     existeRol,
