@@ -191,6 +191,23 @@ Respuesta `201`:
 
 Errores: `400` datos inválidos (p. ej. "La cantidad ingresada debe ser mayor a cero"), `404` producto inexistente, `409` producto inactivo.
 
+### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
+
+> Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).
+
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| POST | `/api/customers` | Registra un cliente. Body: `identificacion` y `nombre` (obligatorios), `tipo_identificacion` (`CC` por defecto; `CE`, `NIT`, `TI`, `PAS`), `telefono`, `correo`, `direccion` |
+| GET | `/api/customers` | Lista paginada. Query: `q` (documento por prefijo, aunque se escriba con puntos, o nombre), `estado` (`true`/`false`), `page`, `limit` (1-100, por defecto 10). Pensado para el autocompletado del POS |
+| GET | `/api/customers/document/:documento` | Busca por documento exacto |
+| GET | `/api/customers/:id` | Detalle del cliente |
+| PUT | `/api/customers/:id` | Edita `nombre`, `telefono`, `correo`, `direccion` o `estado`. **El documento no se puede modificar** |
+| GET | `/api/customers/:id/history` | Historial: resumen (compras completadas, total comprado, última compra, pedidos abiertos) y las últimas compras y pedidos (`limit`, por defecto 20) |
+
+- El documento se guarda sin puntos ni espacios: `1.090.123.456` → `1090123456`.
+- Si el documento ya existe, `POST` responde `409` con el mensaje *"El documento de identidad ya se encuentra registrado."* y devuelve el cliente existente en `cliente`, para cargarlo en pantalla.
+- Errores: `400` datos inválidos, `404` cliente inexistente, `409` documento duplicado.
+
 ---
 
 ## 🚀 Despliegue

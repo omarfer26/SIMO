@@ -13,7 +13,8 @@ db/
 │   ├── 005_ventas.sql          metodos_pago, ventas, detalles_ventas
 │   ├── 006_inventario.sql      proveedores, movimientos_inventario, vista v_kardex
 │   ├── 007_auditoria.sql       log_auditoria
-│   └── 008_ingreso_bodega.sql  función fn_registrar_ingreso_bodega (HU-05)
+│   ├── 008_ingreso_bodega.sql  función fn_registrar_ingreso_bodega (HU-05)
+│   └── 009_clientes.sql        búsqueda por documento y documento inalterable (HU-09)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 └── tests/
@@ -91,6 +92,7 @@ erDiagram
 | Un pedido genera como máximo una venta (RF-20) | `UNIQUE (ventas.id_pedido)` |
 | Totales coherentes | `chk_ventas_total`, `chk_*_subtotal` |
 | Log de auditoría inalterable (RF-24) | triggers + `REVOKE` en `log_auditoria` |
+| Documento del cliente inalterable (CU-09 RB-1) | trigger `fn_documento_cliente_inalterable` (SQLSTATE `SM008`) |
 
 ## Convenciones para el backend
 
