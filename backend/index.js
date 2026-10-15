@@ -4,7 +4,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt'); // Requerido para el punto 1 y 2
 const jwt = require('jsonwebtoken'); // Requerido para el punto 1
 const pool = require('./db'); // Requerido para el punto 1 (ajusta la ruta según tu proyecto)
-const usuariosRoutes = require('./routes/usuariosRoutes'); // Requerido para el punto 1
+const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22 / SCRUM-23 (contrato que usa el frontend)
 
 const app = express();
 // Cambiamos el puerto al 3001 para liberar el 3000 que usa Next.js
@@ -452,5 +452,3 @@ app.post('/api/auth/logout', async (req, res) => {
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
 });
-
-app.use('/api/users', usuariosRoutes);
