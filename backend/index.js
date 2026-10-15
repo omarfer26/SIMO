@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt'); // Requerido para el punto 1 y 2
 const jwt = require('jsonwebtoken'); // Requerido para el punto 1
 const pool = require('./db'); // Requerido para el punto 1 (ajusta la ruta según tu proyecto)
 const usuariosRoutes = require('./routes/usuariosRoutes'); // Requerido para el punto 1
+const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
 
 const app = express();
 // Cambiamos el puerto al 3001 para liberar el 3000 que usa Next.js
@@ -26,6 +27,9 @@ app.get('/api/health', async (req, res) => {
 
 // Módulo de usuarios (SCRUM-22, SCRUM-23)
 app.use('/api/users', usuariosRoutes);
+
+// Módulo de inventario (SCRUM-94 / HU-05)
+app.use('/api/inventory', inventarioRoutes);
 
 // =====================================================================
 // ENDPOINT 1: POST /api/products (Tarea SCRUM-33)
