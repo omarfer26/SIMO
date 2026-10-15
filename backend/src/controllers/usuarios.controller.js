@@ -8,6 +8,8 @@ const {
     crearUsuario,
     listarUsuarios,
     obtenerUsuarioPorId,
+    buscarDuplicadoDeOtro,
+    actualizarUsuario,
 } = require('../repositories/usuarios.repository');
 
 const SALT_ROUNDS = 10;
@@ -160,4 +162,95 @@ async function getUsuarioPorId(req, res) {
     }
 }
 
-module.exports = { postUsuario, getUsuarios, getUsuarioPorId };
+// =====================================================================
+// PUT /api/users/:id (SCRUM-24)
+// Body (todos opcionales, al menos uno): id_rol, nombre_completo, correo, usuario.
+// La contraseña y el estado no se editan aquí: el estado tiene su propio
+// endpoint (SCRUM-25) y la contraseña es otro flujo.
+// =====================================================================
+async function putUsuario(req, res) {
+    try {
+        const { id } = req.params;
+        if (!REGEX_ENTERO_POSITIVO.test(id)) {
+            return badRequest(res, 'El id de usuario debe ser un entero positivo.');
+        }
+        const body = req.body || {};
+
+        if (body.password !== undefined) {
+            return badRequest(res, 'La contraseña no se modifica con este endpoint.');
+        }
+        if (body.estado !== undefined) {
+            return badRequest(res, 'El estado se cambia con PATCH /api/users/:id/status.');
+        }
+
+        const campos = {};
+        if (body.nombre_completo !== undefined) {
+            if (typeof body.nombre_completo !== 'string' || !body.nombre_completo.trim()) {
+                return badRequest(res, 'El nombre completo no puede estar vacío.');
+            }
+            if (body.nombre_completo.trim().length > 150) {
+                return badRequest(res, 'El nombre completo admite máximo 150 caracteres.');
+            }
+            campos.nombre_completo = body.nombre_completo.trim();
+        }
+        if (body.correo !== undefined) {
+            const correo = typeof body.correo === 'string' ? body.correo.trim().toLowerCase() : '';
+            if (!REGEX_CORREO.test(correo) || correo.length > 150) {
+                return badRequest(res, 'El correo no tiene un formato válido.');
+            }
+            campos.correo = correo;
+        }
+        if (body.usuario !== undefined) {
+            if (typeof body.usuario !== 'string' || !body.usuario.trim()) {
+                return badRequest(res, 'El nombre de usuario no puede estar vacío.');
+            }
+            if (body.usuario.trim().length > 50) {
+                return badRequest(res, 'El nombre de usuario admite máximo 50 caracteres.');
+            }
+            campos.usuario = body.usuario.trim();
+        }
+        if (body.id_rol !== undefined) {
+            if (!REGEX_ENTERO_POSITIVO.test(String(body.id_rol)) || !(await existeRol(Number(body.id_rol)))) {
+                return badRequest(res, `El rol con id ${body.id_rol} no existe.`);
+            }
+            campos.id_rol = Number(body.id_rol);
+        }
+        if (Object.keys(campos).length === 0) {
+            return badRequest(res, 'Debe enviar al menos un campo para actualizar: id_rol, nombre_completo, correo o usuario.');
+        }
+
+        if (campos.correo !== undefined || campos.usuario !== undefined) {
+            const duplicado = await buscarDuplicadoDeOtro(Number(id), campos.correo, campos.usuario);
+            if (duplicado) {
+                return res.status(409).json({
+                    error: 'Conflict',
+                    message: 'Ya existe otro usuario con ese correo o nombre de usuario.',
+                });
+            }
+        }
+
+        const resultado = await actualizarUsuario(Number(id), campos);
+        if (resultado.noExiste) {
+            return res.status(404).json({ error: 'Not Found', message: `No existe el usuario con id ${id}.` });
+        }
+        if (resultado.ultimoAdmin) {
+            return res.status(409).json({
+                error: 'Conflict',
+                message: 'No se puede quitar el rol de Administrador al último administrador activo.',
+            });
+        }
+        return res.status(200).json({ message: 'Usuario actualizado exitosamente', usuario: resultado.usuario });
+    } catch (error) {
+        // Dos ediciones simultáneas hacia el mismo correo/usuario: la BD rechaza la segunda
+        if (error.code === '23505') {
+            return res.status(409).json({
+                error: 'Conflict',
+                message: 'Ya existe otro usuario con ese correo o nombre de usuario.',
+            });
+        }
+        console.error('[PUT /api/users/:id] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al actualizar el usuario.' });
+    }
+}
+
+module.exports = { postUsuario, getUsuarios, getUsuarioPorId, putUsuario };
