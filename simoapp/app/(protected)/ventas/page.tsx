@@ -5,21 +5,29 @@ import { useProductos } from "@/components/catalogo/ProductosContext";
 import type { Producto } from "@/components/catalogo/tipos";
 import InputText from "@/components/ui/InputText";
 import Button from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import ConfirmarVenta from "@/components/ventas/ConfirmarVenta";
+import type { ItemCanasta } from "@/lib/ventas/tipos";
 
-interface ItemCanasta {
-  producto: Producto;
-  cantidad: number;
-}
+// SCRUM-50 (Camilo) — Formato de pesos para el aviso de venta registrada.
+const formatoMoneda = new Intl.NumberFormat("es-CO", {
+  style: "currency",
+  currency: "COP",
+  maximumFractionDigits: 0,
+});
 
 export default function VentasPage() {
-  const { productos } = useProductos();
+  const { productos, descontarStock } = useProductos();
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
-  const [alerta, setAlerta] = useState<string | null>(null);
+  // SCRUM-50 (Camilo) — El aviso ahora tiene tipo: rojo para errores (como
+  // antes) y verde para "venta registrada". Y el modal de confirmación.
+  const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
 
-  const mostrarAlerta = (mensaje: string) => {
-    setAlerta(mensaje);
-    setTimeout(() => setAlerta(null), 3000);
+  const mostrarAlerta = (mensaje: string, tipo: "error" | "exito" = "error") => {
+    setAlerta({ mensaje, tipo });
+    setTimeout(() => setAlerta(null), tipo === "exito" ? 6000 : 3000);
   };
 
   // 1. Buscador Predictivo (Filtra por nombre o SKU)
@@ -93,11 +101,20 @@ export default function VentasPage() {
       {/* Toast Notification */}
       {alerta && (
         <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
-          <div className="bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-red-700">
+          <div
+            role="status"
+            className={`text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border ${
+              alerta.tipo === "exito" ? "bg-emerald-600 border-emerald-700" : "bg-red-600 border-red-700"
+            }`}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              {alerta.tipo === "exito" ? (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+              ) : (
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              )}
             </svg>
-            <span className="font-medium text-sm">{alerta}</span>
+            <span className="font-medium text-sm">{alerta.mensaje}</span>
           </div>
         </div>
       )}
@@ -256,11 +273,7 @@ export default function VentasPage() {
               <Button
                 className="w-full h-12 text-base shadow-sm"
                 disabled={canasta.length === 0}
-                onClick={() => {
-                  mostrarAlerta("Venta confirmada simulada exitosamente. (Conexión al backend pendiente)");
-                  setCanasta([]);
-                  setBusqueda("");
-                }}
+                onClick={() => setConfirmando(true)}
               >
                 Confirmar Venta
               </Button>
@@ -268,6 +281,35 @@ export default function VentasPage() {
           </div>
         </div>
       </div>
+
+      {/* SCRUM-50 (Camilo) — Modal de confirmación de venta: método de pago,
+          descuento, total y cambio. No se cierra al hacer clic afuera, para
+          no perder lo que se escribió por un clic accidental. */}
+      <Modal
+        isOpen={confirmando}
+        onClose={() => setConfirmando(false)}
+        title="Confirmar venta"
+        maxWidth="lg"
+        closeOnBackdropClick={false}
+      >
+        <ConfirmarVenta
+          items={canasta}
+          onCancelar={() => setConfirmando(false)}
+          onConfirmada={(venta, cambio) => {
+            descontarStock(
+              canasta.map((item) => ({ id: item.producto.id, cantidad: item.cantidad })),
+            );
+            setConfirmando(false);
+            setCanasta([]);
+            setBusqueda("");
+            mostrarAlerta(
+              `Venta #${venta.idVenta} registrada por ${formatoMoneda.format(venta.total)}.` +
+                (cambio > 0 ? ` Cambio: ${formatoMoneda.format(cambio)}.` : ""),
+              "exito",
+            );
+          }}
+        />
+      </Modal>
     </main>
   );
 }

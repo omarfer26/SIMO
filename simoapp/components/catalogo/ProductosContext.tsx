@@ -37,6 +37,7 @@ interface ProductosContextValue {
   productos: Producto[];
   origen: OrigenProductos;
   agregarProducto: (datos: ProductoNuevo) => Promise<void>;
+  descontarStock: (vendidos: { id: number; cantidad: number }[]) => void;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -205,8 +206,26 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // SCRUM-50 (Camilo) — Después de confirmar una venta en el POS, resta lo
+  // vendido del stock que se ve en pantalla (RN-02), para que el POS y el
+  // catálogo no sigan mostrando el stock de antes. Es solo la copia del
+  // navegador: el descuento de verdad lo hace el backend al registrar la
+  // venta, y la próxima vez que se cargue la lista llegará ya descontado.
+  function descontarStock(vendidos: { id: number; cantidad: number }[]) {
+    setProductos((actuales) =>
+      actuales.map((producto) => {
+        const vendido = vendidos.find((v) => v.id === producto.id);
+        return vendido
+          ? { ...producto, stockActual: Math.max(0, producto.stockActual - vendido.cantidad) }
+          : producto;
+      }),
+    );
+  }
+
   return (
-    <ProductosContext.Provider value={{ productos, origen, agregarProducto }}>
+    <ProductosContext.Provider
+      value={{ productos, origen, agregarProducto, descontarStock }}
+    >
       {children}
     </ProductosContext.Provider>
   );
