@@ -9,6 +9,7 @@
 import { useState } from "react";
 import Navbar from "./Navbar";
 import Sidebar from "./Sidebar";
+import BannerConexion from "./BannerConexion";
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [sidebarAbiertoEnMobile, setSidebarAbiertoEnMobile] = useState(false);
@@ -26,7 +27,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           onCerrarEnMobile={() => setSidebarAbiertoEnMobile(false)}
           onAlternarColapsado={() => setSidebarColapsado((valor) => !valor)}
         />
-        <main className="min-w-0 flex-1">{children}</main>
+        {/* SCRUM-122 (Camilo) — Banner de conexión arriba del contenido, no
+            encima del Sidebar, para no tapar el menú al hacer scroll. */}
+        <main className="min-w-0 flex-1">
+          <BannerConexion />
+          {children}
+        </main>
       </div>
     </div>
   );
