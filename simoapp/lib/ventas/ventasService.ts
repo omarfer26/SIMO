@@ -12,6 +12,7 @@
 //   POST /api/sales
 //   Recibe: {
 //     metodo_pago: "EFECTIVO" | "NEQUI" | ...   (codigo de metodos_pago)
+//     id_cliente: number | null                 (SCRUM-123; null = Consumidor final)
 //     descuento, impuestos, subtotal, total,      (en pesos)
 //     detalles: [{ id_producto, cantidad, precio_unitario }]
 //   }
@@ -45,6 +46,7 @@ export async function registrarVenta(datos: DatosVenta): Promise<VentaRegistrada
   try {
     const { data } = await apiClient.post("/sales", {
       metodo_pago: datos.metodoPago,
+      id_cliente: datos.idCliente,
       subtotal: datos.subtotal,
       descuento: datos.descuento,
       impuestos: datos.impuestos,

@@ -44,6 +44,8 @@ export const METODOS_PAGO: MetodoPago[] = [
 // Lo que el POS le manda al servicio de ventas al confirmar.
 export interface DatosVenta {
   metodoPago: CodigoMetodoPago;
+  /** SCRUM-123 (Camilo) — id_cliente; null = Consumidor final. */
+  idCliente: number | null;
   items: ItemCanasta[];
   subtotal: number;
   descuento: number;

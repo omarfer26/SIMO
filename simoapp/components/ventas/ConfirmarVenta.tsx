@@ -34,6 +34,8 @@ import {
   type VentaRegistrada,
 } from "@/lib/ventas/tipos";
 import { mensajeErrorVenta, registrarVenta } from "@/lib/ventas/ventasService";
+import type { Cliente } from "@/lib/clientes/tipos";
+import { formatoDocumento } from "@/lib/clientes/validaciones";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -43,6 +45,8 @@ const formatoMoneda = new Intl.NumberFormat("es-CO", {
 
 interface ConfirmarVentaProps {
   items: ItemCanasta[];
+  /** SCRUM-123 (Camilo) — Cliente elegido en el POS; null = Consumidor final. */
+  cliente: Cliente | null;
   /** `cambio` va aparte porque no se guarda en el backend, solo se muestra. */
   onConfirmada: (venta: VentaRegistrada, cambio: number) => void;
   onCancelar: () => void;
@@ -50,6 +54,7 @@ interface ConfirmarVentaProps {
 
 export default function ConfirmarVenta({
   items,
+  cliente,
   onConfirmada,
   onCancelar,
 }: ConfirmarVentaProps) {
@@ -99,6 +104,7 @@ export default function ConfirmarVenta({
     try {
       const venta = await registrarVenta({
         metodoPago,
+        idCliente: cliente?.id ?? null,
         items,
         subtotal: liquidacion.subtotal,
         descuento: liquidacion.descuento,
@@ -149,6 +155,47 @@ export default function ConfirmarVenta({
             </li>
           ))}
         </ul>
+      </section>
+
+      {/* SCRUM-123 (Camilo) — Datos del cliente para la factura, tomados
+          automáticamente del cliente elegido en el POS. */}
+      <section className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+        <h4 className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Facturar a
+        </h4>
+        {cliente ? (
+          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            <dt className="text-zinc-500 dark:text-zinc-400">Nombre</dt>
+            <dd className="font-medium text-zinc-900 dark:text-zinc-100">{cliente.nombre}</dd>
+            <dt className="text-zinc-500 dark:text-zinc-400">{cliente.tipoDocumento}</dt>
+            <dd className="text-zinc-900 dark:text-zinc-100">{formatoDocumento(cliente.documento)}</dd>
+            {cliente.telefono && (
+              <>
+                <dt className="text-zinc-500 dark:text-zinc-400">Teléfono</dt>
+                <dd className="text-zinc-900 dark:text-zinc-100">{cliente.telefono}</dd>
+              </>
+            )}
+            {cliente.correo && (
+              <>
+                <dt className="text-zinc-500 dark:text-zinc-400">Correo</dt>
+                <dd className="break-all text-zinc-900 dark:text-zinc-100">{cliente.correo}</dd>
+              </>
+            )}
+            {cliente.direccion && (
+              <>
+                <dt className="text-zinc-500 dark:text-zinc-400">Dirección</dt>
+                <dd className="text-zinc-900 dark:text-zinc-100">{cliente.direccion}</dd>
+              </>
+            )}
+          </dl>
+        ) : (
+          <p className="mt-1 text-zinc-700 dark:text-zinc-300">
+            Consumidor final{" "}
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              (para facturar a alguien, vuelve a la canasta y busca su Cédula/NIT)
+            </span>
+          </p>
+        )}
       </section>
 
       {/* 2. Método de pago: radios de verdad (accesibles con teclado y

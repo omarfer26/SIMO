@@ -7,6 +7,9 @@ import InputText from "@/components/ui/InputText";
 import Button from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import ConfirmarVenta from "@/components/ventas/ConfirmarVenta";
+import SeleccionarCliente from "@/components/ventas/SeleccionarCliente";
+import type { Cliente } from "@/lib/clientes/tipos";
+import { formatoDocumento } from "@/lib/clientes/validaciones";
 import type { ItemCanasta } from "@/lib/ventas/tipos";
 import { leerIdUsuario } from "@/lib/auth/sesion";
 import {
@@ -66,6 +69,18 @@ export default function VentasPage() {
   // antes) y verde para "venta registrada". Y el modal de confirmación.
   const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
   const [confirmando, setConfirmando] = useState(false);
+
+  // SCRUM-123 (Camilo) — Cliente de la venta. null = Consumidor final.
+  // `aperturasCliente` cambia el key del modal cada vez que se abre, para
+  // que arranque limpio en el buscador.
+  const [cliente, setCliente] = useState<Cliente | null>(null);
+  const [eligiendoCliente, setEligiendoCliente] = useState(false);
+  const [aperturasCliente, setAperturasCliente] = useState(0);
+
+  const abrirBuscarCliente = () => {
+    setAperturasCliente((n) => n + 1);
+    setEligiendoCliente(true);
+  };
 
   const mostrarAlerta = (mensaje: string, tipo: "error" | "exito" = "error") => {
     setAlerta({ mensaje, tipo });
@@ -340,6 +355,43 @@ export default function VentasPage() {
               )}
             </div>
 
+            {/* SCRUM-123 (Camilo) — Cliente de la venta: Consumidor final o
+                el elegido en el modal, con sus datos para la factura. */}
+            <section className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Cliente
+                  </p>
+                  {cliente ? (
+                    <>
+                      <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {cliente.nombre}
+                      </p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {cliente.tipoDocumento} {formatoDocumento(cliente.documento)}
+                        {cliente.telefono && ` · ${cliente.telefono}`}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300">Consumidor final</p>
+                  )}
+                </div>
+                {cliente && (
+                  <button
+                    onClick={() => setCliente(null)}
+                    className="shrink-0 text-xs text-zinc-400 hover:text-red-600"
+                    title="Quitar cliente (Consumidor final)"
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+              <Button variant="secondary" className="mt-2 w-full" onClick={abrirBuscarCliente}>
+                {cliente ? "Cambiar cliente" : "🔍 Buscar por Cédula/NIT"}
+              </Button>
+            </section>
+
             <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
               <div className="flex justify-between items-center mb-6">
                 <span className="text-base font-medium text-zinc-600 dark:text-zinc-400">Total a Cobrar</span>
@@ -371,6 +423,7 @@ export default function VentasPage() {
       >
         <ConfirmarVenta
           items={canasta}
+          cliente={cliente}
           onCancelar={() => setConfirmando(false)}
           onConfirmada={(venta, cambio) => {
             descontarStock(
@@ -378,6 +431,7 @@ export default function VentasPage() {
             );
             setConfirmando(false);
             setCanasta([]);
+            setCliente(null);
             setRecuperada(null);
             setBusqueda("");
             mostrarAlerta(
@@ -388,6 +442,17 @@ export default function VentasPage() {
           }}
         />
       </Modal>
+
+      {/* SCRUM-123 (Camilo) — Modal de búsqueda rápida por Cédula/NIT. */}
+      <SeleccionarCliente
+        key={aperturasCliente}
+        abierto={eligiendoCliente}
+        onCerrar={() => setEligiendoCliente(false)}
+        onSeleccionar={(elegido) => {
+          setCliente(elegido);
+          setEligiendoCliente(false);
+        }}
+      />
     </main>
   );
 }
