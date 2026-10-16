@@ -28,7 +28,7 @@ import {
 import { productosMock } from "./productos.mock";
 import type { Categoria, Producto } from "./tipos";
 
-type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "estado">;
+type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "stockBodega" | "stockAlmacen" | "estado">;
 
 // De dónde salió la lista que se está mostrando.
 export type OrigenProductos = "cargando" | "backend" | "respaldo";
@@ -38,6 +38,7 @@ interface ProductosContextValue {
   origen: OrigenProductos;
   agregarProducto: (datos: ProductoNuevo) => Promise<void>;
   descontarStock: (vendidos: { id: number; cantidad: number }[]) => void;
+  actualizarUbicaciones: (id: number, saldoBodega: number, saldoAlmacen: number) => void;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -59,6 +60,9 @@ interface ProductoApi {
   precio_compra: string | number;
   precio_venta: string | number;
   stock_total: string | number;
+  // SCRUM-124 (Camilo) — Opcionales por si el backend no los manda.
+  stock_bodega?: string | number;
+  stock_almacen?: string | number;
   stock_minimo_bodega: string | number;
   estado: boolean;
   categoria?: string;
@@ -96,6 +100,10 @@ function aProducto(fila: ProductoApi): Producto {
     precioCompra: Number(fila.precio_compra),
     precioVenta: Number(fila.precio_venta),
     stockActual: Number(fila.stock_total),
+    // SCRUM-124 (Camilo) — Si el backend no manda el reparto, se asume que
+    // todo está en Bodega, que es donde entra la mercancía.
+    stockBodega: Number(fila.stock_bodega ?? fila.stock_total),
+    stockAlmacen: Number(fila.stock_almacen ?? 0),
     stockMinimo: Number(fila.stock_minimo_bodega),
     estado: fila.estado ? "Activo" : "Inactivo",
   };
@@ -197,6 +205,8 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
           codigo: producto.sku,
           // stock_total es NUMERIC en PostgreSQL y llega como texto ("0.000")
           stockActual: Number(producto.stock_total),
+          stockBodega: Number(producto.stock_bodega ?? producto.stock_total),
+          stockAlmacen: Number(producto.stock_almacen ?? 0),
           estado: producto.estado ? "Activo" : "Inactivo",
         },
       ]);
@@ -211,20 +221,42 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
   // catálogo no sigan mostrando el stock de antes. Es solo la copia del
   // navegador: el descuento de verdad lo hace el backend al registrar la
   // venta, y la próxima vez que se cargue la lista llegará ya descontado.
+  // SCRUM-124 (Camilo) — Ahora también reparte el descuento entre las dos
+  // ubicaciones con la deducción en cascada (RN-02, ver backend/db/README.md):
+  // primero sale de Almacén y lo que falte, de Bodega.
   function descontarStock(vendidos: { id: number; cantidad: number }[]) {
     setProductos((actuales) =>
       actuales.map((producto) => {
         const vendido = vendidos.find((v) => v.id === producto.id);
-        return vendido
-          ? { ...producto, stockActual: Math.max(0, producto.stockActual - vendido.cantidad) }
-          : producto;
+        if (!vendido) return producto;
+        const desdeAlmacen = Math.min(vendido.cantidad, producto.stockAlmacen);
+        const desdeBodega = Math.min(vendido.cantidad - desdeAlmacen, producto.stockBodega);
+        return {
+          ...producto,
+          stockAlmacen: producto.stockAlmacen - desdeAlmacen,
+          stockBodega: producto.stockBodega - desdeBodega,
+          stockActual: Math.max(0, producto.stockActual - vendido.cantidad),
+        };
       }),
+    );
+  }
+
+  // SCRUM-124 (Camilo) — Después de registrar un traslado, deja en pantalla
+  // los saldos que respondió el backend (o el mock). El total no cambia: la
+  // mercancía solo pasa de Bodega a Almacén.
+  function actualizarUbicaciones(id: number, saldoBodega: number, saldoAlmacen: number) {
+    setProductos((actuales) =>
+      actuales.map((producto) =>
+        producto.id === id
+          ? { ...producto, stockBodega: saldoBodega, stockAlmacen: saldoAlmacen }
+          : producto,
+      ),
     );
   }
 
   return (
     <ProductosContext.Provider
-      value={{ productos, origen, agregarProducto, descontarStock }}
+      value={{ productos, origen, agregarProducto, descontarStock, actualizarUbicaciones }}
     >
       {children}
     </ProductosContext.Provider>

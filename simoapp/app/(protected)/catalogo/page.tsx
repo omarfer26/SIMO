@@ -6,12 +6,33 @@
 // poder leer `productos` del ProductosContext compartido en vez de usar
 // siempre el mock fijo — así los productos que se crean en
 // /formuProductos aparecen acá también, sin recargar la página.
+import { useState } from "react";
 import Link from "next/link";
 import BusquedaCatalogo from "@/components/catalogo/BusquedaCatalogo";
 import { useProductos } from "@/components/catalogo/ProductosContext";
+import FormularioTraslado from "@/components/inventario/FormularioTraslado";
+import { Modal } from "@/components/ui/Modal";
+
+const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
 
 export default function CatalogoPage() {
-  const { productos, origen } = useProductos();
+  const { productos, origen, actualizarUbicaciones } = useProductos();
+
+  // SCRUM-124 (Camilo) — Modal de traslado Bodega → Almacén.
+  // `idTraslado` se queda con el último producto aunque el modal se cierre,
+  // para que no se vacíe durante la animación de cierre. El producto se busca
+  // en la lista cada vez, así el modal muestra siempre el stock al día.
+  // `aperturas` cambia el key del formulario para que arranque limpio.
+  const [trasladando, setTrasladando] = useState(false);
+  const [idTraslado, setIdTraslado] = useState<number | null>(null);
+  const [aperturas, setAperturas] = useState(0);
+  const [aviso, setAviso] = useState("");
+  const productoTraslado = productos.find((p) => p.id === idTraslado);
+
+  const mostrarAviso = (mensaje: string) => {
+    setAviso(mensaje);
+    setTimeout(() => setAviso((actual) => (actual === mensaje ? "" : actual)), 6000);
+  };
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-8">
@@ -49,15 +70,61 @@ export default function CatalogoPage() {
         </p>
       )}
 
+      {/* SCRUM-124 (Camilo) — Aviso de traslado registrado. */}
+      {aviso && (
+        <div
+          role="status"
+          className="mt-6 flex items-start justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+        >
+          <span>{aviso}</span>
+          <button onClick={() => setAviso("")} aria-label="Cerrar aviso" className="text-emerald-600">
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="mt-6">
         {origen === "cargando" ? (
           <p role="status" className="text-sm text-zinc-500 dark:text-zinc-400">
             Cargando catálogo...
           </p>
         ) : (
-          <BusquedaCatalogo productos={productos} />
+          <BusquedaCatalogo
+            productos={productos}
+            onTrasladar={(producto) => {
+              setIdTraslado(producto.id);
+              setAperturas((n) => n + 1);
+              setTrasladando(true);
+            }}
+          />
         )}
       </div>
+
+      {/* No se cierra con un clic afuera, para no perder lo escrito. */}
+      <Modal
+        isOpen={trasladando}
+        onClose={() => setTrasladando(false)}
+        title="Trasladar de Bodega a Almacén"
+        maxWidth="lg"
+        closeOnBackdropClick={false}
+      >
+        {productoTraslado && (
+          <FormularioTraslado
+            key={aperturas}
+            producto={productoTraslado}
+            onCancelar={() => setTrasladando(false)}
+            onRegistrado={(traslado, responsable) => {
+              actualizarUbicaciones(productoTraslado.id, traslado.saldoBodega, traslado.saldoAlmacen);
+              setTrasladando(false);
+              mostrarAviso(
+                `Traslado #${traslado.idMovimiento} registrado: ${formatoCantidad.format(traslado.cantidad)} ` +
+                  `de ${productoTraslado.nombre} pasaron a Almacén` +
+                  (responsable ? ` (entregó ${responsable}).` : "."),
+              );
+            }}
+          />
+        )}
+      </Modal>
     </main>
   );
 }
