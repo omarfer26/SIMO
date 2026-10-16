@@ -11,6 +11,7 @@
 // pueda desactivarse ni quitarse el rol a sí mismo. No da ningún permiso:
 // quien decide qué puede hacer cada uno es el token, en el backend.
 
+import { borrarCanastaGuardada } from "@/lib/ventas/canastaGuardada";
 import type { SesionIniciada } from "./tipos";
 
 // El backend firma el JWT con 8 horas de vida; la cookie dura lo mismo.
@@ -41,6 +42,9 @@ export function cerrarSesion() {
   // Restos de la versión anterior del login, que guardaba en localStorage.
   localStorage.removeItem("token");
   localStorage.removeItem("role");
+  // SCRUM-121 (Camilo) — La canasta del POS que haya quedado guardada es de
+  // quien está saliendo: se borra para que el siguiente no la vea.
+  borrarCanastaGuardada();
 }
 
 export function leerToken(): string | null {

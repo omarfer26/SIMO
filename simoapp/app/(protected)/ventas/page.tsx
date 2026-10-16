@@ -8,6 +8,13 @@ import Button from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import ConfirmarVenta from "@/components/ventas/ConfirmarVenta";
 import type { ItemCanasta } from "@/lib/ventas/tipos";
+import { leerIdUsuario } from "@/lib/auth/sesion";
+import {
+  guardarCanasta,
+  leerCanastaGuardada,
+  reconstruirCanasta,
+  type CanastaRecuperada,
+} from "@/lib/ventas/canastaGuardada";
 
 // SCRUM-50 (Camilo) — Formato de pesos para el aviso de venta registrada.
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
@@ -16,10 +23,45 @@ const formatoMoneda = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
+// SCRUM-121 (Camilo) — Hora en que se guardó la canasta recuperada.
+const formatoHora = new Intl.DateTimeFormat("es-CO", { hour: "numeric", minute: "2-digit" });
+
+function cuandoSeGuardo(fecha: Date) {
+  const hora = formatoHora.format(fecha);
+  return fecha.toDateString() === new Date().toDateString() ? `a las ${hora}` : `ayer a las ${hora}`;
+}
+
 export default function VentasPage() {
-  const { productos, descontarStock } = useProductos();
+  const { productos, origen, descontarStock } = useProductos();
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
+
+  // SCRUM-121 (Camilo) — Persistencia de la canasta en el navegador.
+  // 1. Recuperar: apenas el catálogo termina de cargar (antes no se puede
+  //    saber qué productos siguen existiendo ni su stock), se lee la canasta
+  //    guardada y se cruza con el catálogo actual. Se hace una sola vez.
+  //    Va aquí, durante el render y no en un useEffect, igual que el patrón
+  //    "guardar el valor anterior" de Modal.tsx: así la canasta aparece en el
+  //    mismo instante en que aparecen los productos, sin un parpadeo vacío.
+  const [recuperacion, setRecuperacion] = useState<"pendiente" | "lista">("pendiente");
+  const [recuperada, setRecuperada] = useState<CanastaRecuperada | null>(null);
+  if (recuperacion === "pendiente" && origen !== "cargando") {
+    setRecuperacion("lista");
+    const guardada = leerCanastaGuardada(leerIdUsuario());
+    if (guardada) {
+      const resultado = reconstruirCanasta(guardada, productos);
+      setCanasta(resultado.items);
+      setRecuperada(resultado);
+    }
+  }
+
+  // 2. Guardar: cada vez que cambia la canasta (agregar, +, −, quitar,
+  //    confirmar la venta). Si queda vacía, se borra lo guardado. No se
+  //    guarda nada antes de recuperar, para no pisar la canasta guardada
+  //    con la lista vacía del primer instante.
+  useEffect(() => {
+    if (recuperacion === "lista") guardarCanasta(canasta, leerIdUsuario());
+  }, [canasta, recuperacion]);
   // SCRUM-50 (Camilo) — El aviso ahora tiene tipo: rojo para errores (como
   // antes) y verde para "venta registrada". Y el modal de confirmación.
   const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
@@ -202,6 +244,41 @@ export default function VentasPage() {
               Canasta de Compras
             </h2>
 
+            {/* SCRUM-121 (Camilo) — Aviso de canasta recuperada, con lo que
+                se quitó o se ajustó porque el catálogo cambió mientras tanto. */}
+            {recuperada && (
+              <div
+                role="status"
+                className="mb-4 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200"
+              >
+                <div className="flex-1 space-y-1">
+                  <p>
+                    Recuperamos la canasta que quedó sin terminar (guardada{" "}
+                    {cuandoSeGuardo(recuperada.guardadaEn)}).
+                  </p>
+                  {recuperada.quitados.length > 0 && (
+                    <p className="text-xs">
+                      Se quitaron porque ya no están disponibles:{" "}
+                      <strong>{recuperada.quitados.join(", ")}</strong>.
+                    </p>
+                  )}
+                  {recuperada.ajustados.length > 0 && (
+                    <p className="text-xs">
+                      Se bajó la cantidad al stock que queda:{" "}
+                      <strong>{recuperada.ajustados.join(", ")}</strong>.
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setRecuperada(null)}
+                  className="text-sky-500 hover:text-sky-700 dark:hover:text-sky-300"
+                  aria-label="Cerrar aviso"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               {canasta.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-zinc-400">
@@ -301,6 +378,7 @@ export default function VentasPage() {
             );
             setConfirmando(false);
             setCanasta([]);
+            setRecuperada(null);
             setBusqueda("");
             mostrarAlerta(
               `Venta #${venta.idVenta} registrada por ${formatoMoneda.format(venta.total)}.` +
