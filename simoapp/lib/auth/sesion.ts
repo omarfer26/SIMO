@@ -31,9 +31,15 @@ export function guardarSesion(sesion: SesionIniciada) {
 export function cerrarSesion() {
   escribirCookie("token", "", 0);
   escribirCookie("role", "", 0);
-  // Restos de la versión anterior del login, que guardaba en localStorage.
-  localStorage.removeItem("token");
-  localStorage.removeItem("role");
+  // Limpieza completa de LocalStorage y SessionStorage del cliente
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("usuario");
+    localStorage.removeItem("user");
+    localStorage.removeItem("auth");
+    sessionStorage.clear();
+  }
 }
 
 export function leerToken(): string | null {

@@ -16,6 +16,7 @@ export default function VentasPage() {
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
   const [alerta, setAlerta] = useState<string | null>(null);
+  const [ultimoEscaneado, setUltimoEscaneado] = useState<string | null>(null);
 
   const mostrarAlerta = (mensaje: string) => {
     setAlerta(mensaje);
@@ -48,7 +49,7 @@ export default function VentasPage() {
 
     setCanasta((prev) => {
       const existe = prev.find((item) => item.producto.id === producto.id);
-      
+
       if (existe) {
         return prev.map((item) =>
           item.producto.id === producto.id
@@ -56,10 +57,71 @@ export default function VentasPage() {
             : item
         );
       }
-      
+
       return [...prev, { producto, cantidad: 1 }];
     });
   };
+
+  // Función para procesar y agregar directamente un código de barras / SKU escaneado
+  const procesarCodigoEscaneado = (skuOcodigo: string) => {
+    const codigoLimpio = skuOcodigo.trim().toLowerCase();
+    if (!codigoLimpio) return;
+
+    const productoEncontrado = productos.find(
+      (p) => p.estado === "Activo" && p.codigo.trim().toLowerCase() === codigoLimpio
+    );
+
+    if (productoEncontrado) {
+      agregarProducto(productoEncontrado);
+      setUltimoEscaneado(productoEncontrado.nombre);
+      setTimeout(() => setUltimoEscaneado(null), 2500);
+      setBusqueda("");
+    } else {
+      mostrarAlerta(`Código no encontrado: "${skuOcodigo.trim()}"`);
+    }
+  };
+
+  // 3. Listener para Lector de Código de Barras USB (Captura ultra rápida estilo teclado HID)
+  useEffect(() => {
+    let buffer = "";
+    let ultimoTiempo = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignorar teclas especiales que no corresponden a caracteres imprimibles ni Enter
+      if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
+        return;
+      }
+
+      const ahora = Date.now();
+      const delta = ahora - ultimoTiempo;
+      ultimoTiempo = ahora;
+
+      // Si el tiempo entre teclas supera 65ms, se asume entrada manual y se reinicia el búfer del escáner
+      if (delta > 65) {
+        buffer = "";
+      }
+
+      if (e.key === "Enter") {
+        // Los lectores USB envían "Enter" tras volcar el código a alta velocidad
+        if (buffer.length >= 2) {
+          e.preventDefault();
+          procesarCodigoEscaneado(buffer);
+          buffer = "";
+        }
+        return;
+      }
+
+      // Si es un solo carácter imprimible
+      if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [productos, canasta]);
 
   const modificarCantidad = (id: number, delta: number) => {
     setCanasta((prev) => {
@@ -90,7 +152,7 @@ export default function VentasPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8 relative">
-      {/* Toast Notification */}
+      {/* Toast Notification Error/Agotado */}
       {alerta && (
         <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
           <div className="bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-red-700">
@@ -102,13 +164,31 @@ export default function VentasPage() {
         </div>
       )}
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          Punto de Venta (POS)
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Busca productos y agrégalos a la canasta.
-        </p>
+      {/* Feedback de Escaneo Exitoso */}
+      {ultimoEscaneado && (
+        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
+          <div className="bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-emerald-700">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <span className="font-medium text-sm">Escaneado y agregado: <strong>{ultimoEscaneado}</strong></span>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+            Punto de Venta (POS)
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Busca productos o escanea con el lector de código de barras USB.
+          </p>
+        </div>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 self-start sm:self-auto">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          Lector de Códigos USB Activo
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
@@ -116,9 +196,15 @@ export default function VentasPage() {
         <div className="lg:col-span-7 flex flex-col gap-4">
           <InputText
             name="busqueda"
-            placeholder="🔍 Buscar por nombre, código o lector de barras..."
+            placeholder="🔍 Buscar por nombre, código o escanear código de barras..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && busqueda.trim().length > 0) {
+                e.preventDefault();
+                procesarCodigoEscaneado(busqueda.trim());
+              }
+            }}
             autoComplete="off"
           />
 
@@ -134,10 +220,9 @@ export default function VentasPage() {
                   <div
                     key={prod.id}
                     className={`flex flex-col justify-between rounded-lg border p-4 shadow-sm transition-colors
-                      ${
-                        !sinStock
-                          ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-                          : "border-red-300 bg-red-50/80 dark:border-red-900 dark:bg-red-950/30"
+                      ${!sinStock
+                        ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+                        : "border-red-300 bg-red-50/80 dark:border-red-900 dark:bg-red-950/30"
                       }
                     `}
                   >
@@ -147,11 +232,10 @@ export default function VentasPage() {
                           {prod.codigo}
                         </span>
                         <span
-                          className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                            !sinStock
+                          className={`text-xs font-bold px-2 py-0.5 rounded-full ${!sinStock
                               ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
                               : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
-                          }`}
+                            }`}
                         >
                           Stock Disp: {stockDisponible}
                         </span>
@@ -163,7 +247,7 @@ export default function VentasPage() {
                         ${prod.precioVenta.toLocaleString()}
                       </p>
                     </div>
-                    
+
                     <Button
                       className={`mt-4 w-full transition-all ${sinStock ? "opacity-75 bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 text-white cursor-not-allowed" : ""}`}
                       disabled={sinStock}
@@ -194,7 +278,7 @@ export default function VentasPage() {
               ) : (
                 canasta.map((item) => {
                   const limiteAlcanzado = item.cantidad >= item.producto.stockActual;
-                  
+
                   return (
                     <div key={item.producto.id} className="flex flex-col gap-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-100 dark:border-zinc-800">
                       <div className="flex justify-between items-start">
@@ -209,7 +293,7 @@ export default function VentasPage() {
                           ✕
                         </button>
                       </div>
-                      
+
                       <div className="flex items-center justify-between mt-1">
                         <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md">
                           <button
@@ -230,7 +314,7 @@ export default function VentasPage() {
                             +
                           </button>
                         </div>
-                        
+
                         <div className="text-right">
                           <p className="text-xs text-zinc-500 dark:text-zinc-400">
                             ${item.producto.precioVenta.toLocaleString()} c/u
@@ -271,4 +355,3 @@ export default function VentasPage() {
     </main>
   );
 }
-

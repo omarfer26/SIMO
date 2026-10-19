@@ -20,6 +20,7 @@ type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "estado">;
 interface ProductosContextValue {
   productos: Producto[];
   agregarProducto: (datos: ProductoNuevo) => Promise<void>;
+  limpiarProductos: () => void;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -95,8 +96,12 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  function limpiarProductos() {
+    setProductos(productosMock);
+  }
+
   return (
-    <ProductosContext.Provider value={{ productos, agregarProducto }}>
+    <ProductosContext.Provider value={{ productos, agregarProducto, limpiarProductos }}>
       {children}
     </ProductosContext.Provider>
   );
