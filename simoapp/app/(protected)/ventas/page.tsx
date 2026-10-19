@@ -8,10 +8,13 @@ import Button from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import ConfirmarVenta from "@/components/ventas/ConfirmarVenta";
 import SeleccionarCliente from "@/components/ventas/SeleccionarCliente";
+import SelectorCajeroTurno from "@/components/ventas/SelectorCajeroTurno";
 import type { Cliente } from "@/lib/clientes/tipos";
 import { formatoDocumento } from "@/lib/clientes/validaciones";
 import type { ItemCanasta } from "@/lib/ventas/tipos";
 import { leerIdUsuario } from "@/lib/auth/sesion";
+import { listarUsuarios } from "@/lib/auth/authService";
+import type { UsuarioListado } from "@/lib/auth/tipos";
 import {
   guardarCanasta,
   leerCanastaGuardada,
@@ -68,6 +71,7 @@ export default function VentasPage() {
   // SCRUM-50 (Camilo) — El aviso ahora tiene tipo: rojo para errores (como
   // antes) y verde para "venta registrada". Y el modal de confirmación.
   const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
+  const [ultimoEscaneado, setUltimoEscaneado] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState(false);
 
   // SCRUM-123 (Camilo) — Cliente de la venta. null = Consumidor final.
@@ -76,6 +80,38 @@ export default function VentasPage() {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [eligiendoCliente, setEligiendoCliente] = useState(false);
   const [aperturasCliente, setAperturasCliente] = useState(0);
+
+  // Cajero / Vendedor en turno POS
+  const [cajeroActual, setCajeroActual] = useState<UsuarioListado | null>(null);
+  const [cajerosDisponibles, setCajerosDisponibles] = useState<UsuarioListado[]>([]);
+  const [cargandoCajeros, setCargandoCajeros] = useState(true);
+
+  // Cargar usuarios para asociar la transacción al cajero en turno
+  useEffect(() => {
+    let activo = true;
+    async function cargarCajeros() {
+      try {
+        const lista = await listarUsuarios();
+        if (!activo) return;
+        // Solo usuarios activos (VENDEDOR, ADMIN o GERENTE que pueden operar caja)
+        const activos = lista.filter((u) => u.activo);
+        setCajerosDisponibles(activos);
+
+        // Preseleccionar al usuario que tiene la sesión iniciada
+        const idSesion = leerIdUsuario();
+        const enSesion = activos.find((u) => u.id === idSesion);
+        setCajeroActual(enSesion || activos[0] || null);
+      } catch (err) {
+        console.error("Error al cargar cajeros en turno:", err);
+      } finally {
+        if (activo) setCargandoCajeros(false);
+      }
+    }
+    cargarCajeros();
+    return () => {
+      activo = false;
+    };
+  }, []);
 
   const abrirBuscarCliente = () => {
     setAperturasCliente((n) => n + 1);
@@ -337,9 +373,22 @@ export default function VentasPage() {
         {/* Lado Derecho: Canasta de Compras */}
         <div className="lg:col-span-5">
           <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm flex flex-col h-full max-h-[75vh] dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-4 border-b border-zinc-100 dark:border-zinc-800 pb-3">
-              Canasta de Compras
-            </h2>
+            <div className="border-b border-zinc-100 dark:border-zinc-800 pb-3 mb-4 space-y-3">
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                Canasta de Compras
+              </h2>
+
+              {/* Selector de Cajero / Vendedor en turno */}
+              <SelectorCajeroTurno
+                cajeroActual={cajeroActual}
+                cajerosDisponibles={cajerosDisponibles}
+                cargando={cargandoCajeros}
+                onCambiarCajero={(cajero) => {
+                  setCajeroActual(cajero);
+                  mostrarAlerta(`Cajero en turno: ${cajero.nombreCompleto}`, "exito");
+                }}
+              />
+            </div>
 
             {/* SCRUM-121 (Camilo) — Aviso de canasta recuperada, con lo que
                 se quitó o se ajustó porque el catálogo cambió mientras tanto. */}
@@ -506,6 +555,7 @@ export default function VentasPage() {
         <ConfirmarVenta
           items={canasta}
           cliente={cliente}
+          cajero={cajeroActual}
           onCancelar={() => setConfirmando(false)}
           onConfirmada={(venta, cambio) => {
             descontarStock(

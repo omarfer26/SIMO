@@ -46,6 +46,8 @@ export interface DatosVenta {
   metodoPago: CodigoMetodoPago;
   /** SCRUM-123 (Camilo) — id_cliente; null = Consumidor final. */
   idCliente: number | null;
+  /** Cajero / Vendedor en turno que opera la caja registradora */
+  idVendedor?: number | null;
   items: ItemCanasta[];
   subtotal: number;
   descuento: number;

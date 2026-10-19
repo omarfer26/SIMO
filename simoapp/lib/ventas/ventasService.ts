@@ -47,6 +47,7 @@ export async function registrarVenta(datos: DatosVenta): Promise<VentaRegistrada
     const { data } = await apiClient.post("/sales", {
       metodo_pago: datos.metodoPago,
       id_cliente: datos.idCliente,
+      id_vendedor: datos.idVendedor ?? null,
       subtotal: datos.subtotal,
       descuento: datos.descuento,
       impuestos: datos.impuestos,

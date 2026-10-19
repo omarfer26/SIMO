@@ -36,6 +36,7 @@ import {
 import { mensajeErrorVenta, registrarVenta } from "@/lib/ventas/ventasService";
 import type { Cliente } from "@/lib/clientes/tipos";
 import { formatoDocumento } from "@/lib/clientes/validaciones";
+import type { UsuarioListado } from "@/lib/auth/tipos";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -47,6 +48,8 @@ interface ConfirmarVentaProps {
   items: ItemCanasta[];
   /** SCRUM-123 (Camilo) — Cliente elegido en el POS; null = Consumidor final. */
   cliente: Cliente | null;
+  /** Cajero / Vendedor en turno */
+  cajero?: UsuarioListado | null;
   /** `cambio` va aparte porque no se guarda en el backend, solo se muestra. */
   onConfirmada: (venta: VentaRegistrada, cambio: number) => void;
   onCancelar: () => void;
@@ -55,6 +58,7 @@ interface ConfirmarVentaProps {
 export default function ConfirmarVenta({
   items,
   cliente,
+  cajero,
   onConfirmada,
   onCancelar,
 }: ConfirmarVentaProps) {
@@ -105,6 +109,7 @@ export default function ConfirmarVenta({
       const venta = await registrarVenta({
         metodoPago,
         idCliente: cliente?.id ?? null,
+        idVendedor: cajero?.id ?? null,
         items,
         subtotal: liquidacion.subtotal,
         descuento: liquidacion.descuento,
@@ -197,6 +202,26 @@ export default function ConfirmarVenta({
           </p>
         )}
       </section>
+
+      {/* Cajero / Vendedor en turno */}
+      {cajero && (
+        <section className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50/50 px-3 py-2 text-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-200 text-[10px] font-bold text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
+              {cajero.nombreCompleto.charAt(0)}
+            </span>
+            <div className="text-xs">
+              <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                Atendido por: {cajero.nombreCompleto}
+              </span>
+              <span className="text-zinc-500 dark:text-zinc-400"> (@{cajero.usuario})</span>
+            </div>
+          </div>
+          <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+            {cajero.rol}
+          </span>
+        </section>
+      )}
 
       {/* 2. Método de pago: radios de verdad (accesibles con teclado y
           lector de pantalla), con el círculo escondido y la tarjeta entera

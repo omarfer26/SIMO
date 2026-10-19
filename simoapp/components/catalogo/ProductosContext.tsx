@@ -39,6 +39,7 @@ interface ProductosContextValue {
   agregarProducto: (datos: ProductoNuevo) => Promise<void>;
   descontarStock: (vendidos: { id: number; cantidad: number }[]) => void;
   actualizarUbicaciones: (id: number, saldoBodega: number, saldoAlmacen: number) => void;
+  limpiarProductos: () => void;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -254,9 +255,20 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  function limpiarProductos() {
+    setProductos(productosMock);
+  }
+
   return (
     <ProductosContext.Provider
-      value={{ productos, origen, agregarProducto, descontarStock, actualizarUbicaciones }}
+      value={{
+        productos,
+        origen,
+        agregarProducto,
+        descontarStock,
+        actualizarUbicaciones,
+        limpiarProductos,
+      }}
     >
       {children}
     </ProductosContext.Provider>
