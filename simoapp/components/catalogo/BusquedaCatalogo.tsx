@@ -10,7 +10,6 @@
 //    la combinación de filtros elegida.
 
 import { useMemo, useState } from "react";
-import { productosMock } from "./productos.mock";
 import type {
   FiltroCategoria,
   FiltroDisponibilidad,
@@ -25,16 +24,19 @@ const formatoMoneda = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
-// El backend aún no expone /productos: por eso `productos` tiene un valor
-// por defecto (los datos de prueba) pero se puede pasar por props cuando
-// exista el fetch real, sin tocar la lógica de filtrado de este componente.
+// SCRUM-catalogoBD (Camilo) — `productos` ahora es obligatorio: la lista la
+// entrega la página, que la lee del ProductosContext (y este, del backend).
+// Antes tenía los datos de prueba como valor por defecto.
 interface BusquedaCatalogoProps {
-  productos?: Producto[];
+  productos: Producto[];
+  /** SCRUM-124 (Camilo) — Si se pasa, cada tarjeta muestra "Trasladar a Almacén". */
+  onTrasladar?: (producto: Producto) => void;
 }
 
-export default function BusquedaCatalogo({
-  productos = productosMock,
-}: BusquedaCatalogoProps) {
+// SCRUM-124 (Camilo) — Formato para las cantidades de Bodega y Almacén.
+const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
+
+export default function BusquedaCatalogo({ productos, onTrasladar }: BusquedaCatalogoProps) {
   const [texto, setTexto] = useState("");
   const [categoria, setCategoria] = useState<FiltroCategoria>("todas");
   const [disponibilidad, setDisponibilidad] =
@@ -221,6 +223,13 @@ export default function BusquedaCatalogo({
                   {producto.categoria} · {producto.unidadMedida}
                 </p>
 
+                {/* SCRUM-124 (Camilo) — Dónde está el stock. */}
+                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                  Bodega <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockBodega)}</strong>
+                  {" · "}
+                  Almacén <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockAlmacen)}</strong>
+                </p>
+
                 <div className="mt-auto flex items-center justify-between pt-2">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {formatoMoneda.format(producto.precioVenta)}
@@ -235,6 +244,27 @@ export default function BusquedaCatalogo({
                       : "Agotado"}
                   </Badge>
                 </div>
+
+                {/* SCRUM-124 (Camilo) — Abre el formulario de traslado. Se
+                    deshabilita si no hay nada en Bodega o si el producto está
+                    inactivo, y el título explica por qué. */}
+                {onTrasladar && (
+                  <button
+                    type="button"
+                    onClick={() => onTrasladar(producto)}
+                    disabled={producto.stockBodega <= 0 || producto.estado !== "Activo"}
+                    title={
+                      producto.estado !== "Activo"
+                        ? "El producto está inactivo"
+                        : producto.stockBodega <= 0
+                          ? "No hay unidades en Bodega para trasladar"
+                          : undefined
+                    }
+                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
+                  >
+                    Trasladar a Almacén
+                  </button>
+                )}
               </li>
             );
           })}

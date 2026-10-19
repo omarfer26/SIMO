@@ -5,22 +5,86 @@ import { useProductos } from "@/components/catalogo/ProductosContext";
 import type { Producto } from "@/components/catalogo/tipos";
 import InputText from "@/components/ui/InputText";
 import Button from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import ConfirmarVenta from "@/components/ventas/ConfirmarVenta";
+import SeleccionarCliente from "@/components/ventas/SeleccionarCliente";
+import type { Cliente } from "@/lib/clientes/tipos";
+import { formatoDocumento } from "@/lib/clientes/validaciones";
+import type { ItemCanasta } from "@/lib/ventas/tipos";
+import { leerIdUsuario } from "@/lib/auth/sesion";
+import {
+  guardarCanasta,
+  leerCanastaGuardada,
+  reconstruirCanasta,
+  type CanastaRecuperada,
+} from "@/lib/ventas/canastaGuardada";
 
-interface ItemCanasta {
-  producto: Producto;
-  cantidad: number;
+// SCRUM-50 (Camilo) — Formato de pesos para el aviso de venta registrada.
+const formatoMoneda = new Intl.NumberFormat("es-CO", {
+  style: "currency",
+  currency: "COP",
+  maximumFractionDigits: 0,
+});
+
+// SCRUM-121 (Camilo) — Hora en que se guardó la canasta recuperada.
+const formatoHora = new Intl.DateTimeFormat("es-CO", { hour: "numeric", minute: "2-digit" });
+
+function cuandoSeGuardo(fecha: Date) {
+  const hora = formatoHora.format(fecha);
+  return fecha.toDateString() === new Date().toDateString() ? `a las ${hora}` : `ayer a las ${hora}`;
 }
 
 export default function VentasPage() {
-  const { productos } = useProductos();
+  const { productos, origen, descontarStock } = useProductos();
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
-  const [alerta, setAlerta] = useState<string | null>(null);
-  const [ultimoEscaneado, setUltimoEscaneado] = useState<string | null>(null);
 
-  const mostrarAlerta = (mensaje: string) => {
-    setAlerta(mensaje);
-    setTimeout(() => setAlerta(null), 3000);
+  // SCRUM-121 (Camilo) — Persistencia de la canasta en el navegador.
+  // 1. Recuperar: apenas el catálogo termina de cargar (antes no se puede
+  //    saber qué productos siguen existiendo ni su stock), se lee la canasta
+  //    guardada y se cruza con el catálogo actual. Se hace una sola vez.
+  //    Va aquí, durante el render y no en un useEffect, igual que el patrón
+  //    "guardar el valor anterior" de Modal.tsx: así la canasta aparece en el
+  //    mismo instante en que aparecen los productos, sin un parpadeo vacío.
+  const [recuperacion, setRecuperacion] = useState<"pendiente" | "lista">("pendiente");
+  const [recuperada, setRecuperada] = useState<CanastaRecuperada | null>(null);
+  if (recuperacion === "pendiente" && origen !== "cargando") {
+    setRecuperacion("lista");
+    const guardada = leerCanastaGuardada(leerIdUsuario());
+    if (guardada) {
+      const resultado = reconstruirCanasta(guardada, productos);
+      setCanasta(resultado.items);
+      setRecuperada(resultado);
+    }
+  }
+
+  // 2. Guardar: cada vez que cambia la canasta (agregar, +, −, quitar,
+  //    confirmar la venta). Si queda vacía, se borra lo guardado. No se
+  //    guarda nada antes de recuperar, para no pisar la canasta guardada
+  //    con la lista vacía del primer instante.
+  useEffect(() => {
+    if (recuperacion === "lista") guardarCanasta(canasta, leerIdUsuario());
+  }, [canasta, recuperacion]);
+  // SCRUM-50 (Camilo) — El aviso ahora tiene tipo: rojo para errores (como
+  // antes) y verde para "venta registrada". Y el modal de confirmación.
+  const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
+
+  // SCRUM-123 (Camilo) — Cliente de la venta. null = Consumidor final.
+  // `aperturasCliente` cambia el key del modal cada vez que se abre, para
+  // que arranque limpio en el buscador.
+  const [cliente, setCliente] = useState<Cliente | null>(null);
+  const [eligiendoCliente, setEligiendoCliente] = useState(false);
+  const [aperturasCliente, setAperturasCliente] = useState(0);
+
+  const abrirBuscarCliente = () => {
+    setAperturasCliente((n) => n + 1);
+    setEligiendoCliente(true);
+  };
+
+  const mostrarAlerta = (mensaje: string, tipo: "error" | "exito" = "error") => {
+    setAlerta({ mensaje, tipo });
+    setTimeout(() => setAlerta(null), tipo === "exito" ? 6000 : 3000);
   };
 
   // 1. Buscador Predictivo (Filtra por nombre o SKU)
@@ -155,11 +219,19 @@ export default function VentasPage() {
       {/* Toast Notification Error/Agotado */}
       {alerta && (
         <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
-          <div className="bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-red-700">
+          <div
+            role="status"
+            className={`text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border ${alerta.tipo === "exito" ? "bg-emerald-600 border-emerald-700" : "bg-red-600 border-red-700"
+              }`}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              {alerta.tipo === "exito" ? (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+              ) : (
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              )}
             </svg>
-            <span className="font-medium text-sm">{alerta}</span>
+            <span className="font-medium text-sm">{alerta.mensaje}</span>
           </div>
         </div>
       )}
@@ -233,8 +305,8 @@ export default function VentasPage() {
                         </span>
                         <span
                           className={`text-xs font-bold px-2 py-0.5 rounded-full ${!sinStock
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
-                              : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
+                            : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
                             }`}
                         >
                           Stock Disp: {stockDisponible}
@@ -268,6 +340,41 @@ export default function VentasPage() {
             <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-4 border-b border-zinc-100 dark:border-zinc-800 pb-3">
               Canasta de Compras
             </h2>
+
+            {/* SCRUM-121 (Camilo) — Aviso de canasta recuperada, con lo que
+                se quitó o se ajustó porque el catálogo cambió mientras tanto. */}
+            {recuperada && (
+              <div
+                role="status"
+                className="mb-4 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200"
+              >
+                <div className="flex-1 space-y-1">
+                  <p>
+                    Recuperamos la canasta que quedó sin terminar (guardada{" "}
+                    {cuandoSeGuardo(recuperada.guardadaEn)}).
+                  </p>
+                  {recuperada.quitados.length > 0 && (
+                    <p className="text-xs">
+                      Se quitaron porque ya no están disponibles:{" "}
+                      <strong>{recuperada.quitados.join(", ")}</strong>.
+                    </p>
+                  )}
+                  {recuperada.ajustados.length > 0 && (
+                    <p className="text-xs">
+                      Se bajó la cantidad al stock que queda:{" "}
+                      <strong>{recuperada.ajustados.join(", ")}</strong>.
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setRecuperada(null)}
+                  className="text-sky-500 hover:text-sky-700 dark:hover:text-sky-300"
+                  aria-label="Cerrar aviso"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               {canasta.length === 0 ? (
@@ -330,6 +437,43 @@ export default function VentasPage() {
               )}
             </div>
 
+            {/* SCRUM-123 (Camilo) — Cliente de la venta: Consumidor final o
+                el elegido en el modal, con sus datos para la factura. */}
+            <section className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Cliente
+                  </p>
+                  {cliente ? (
+                    <>
+                      <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {cliente.nombre}
+                      </p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {cliente.tipoDocumento} {formatoDocumento(cliente.documento)}
+                        {cliente.telefono && ` · ${cliente.telefono}`}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300">Consumidor final</p>
+                  )}
+                </div>
+                {cliente && (
+                  <button
+                    onClick={() => setCliente(null)}
+                    className="shrink-0 text-xs text-zinc-400 hover:text-red-600"
+                    title="Quitar cliente (Consumidor final)"
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+              <Button variant="secondary" className="mt-2 w-full" onClick={abrirBuscarCliente}>
+                {cliente ? "Cambiar cliente" : "🔍 Buscar por Cédula/NIT"}
+              </Button>
+            </section>
+
             <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
               <div className="flex justify-between items-center mb-6">
                 <span className="text-base font-medium text-zinc-600 dark:text-zinc-400">Total a Cobrar</span>
@@ -340,11 +484,7 @@ export default function VentasPage() {
               <Button
                 className="w-full h-12 text-base shadow-sm"
                 disabled={canasta.length === 0}
-                onClick={() => {
-                  mostrarAlerta("Venta confirmada simulada exitosamente. (Conexión al backend pendiente)");
-                  setCanasta([]);
-                  setBusqueda("");
-                }}
+                onClick={() => setConfirmando(true)}
               >
                 Confirmar Venta
               </Button>
@@ -352,6 +492,49 @@ export default function VentasPage() {
           </div>
         </div>
       </div>
+
+      {/* SCRUM-50 (Camilo) — Modal de confirmación de venta: método de pago,
+          descuento, total y cambio. No se cierra al hacer clic afuera, para
+          no perder lo que se escribió por un clic accidental. */}
+      <Modal
+        isOpen={confirmando}
+        onClose={() => setConfirmando(false)}
+        title="Confirmar venta"
+        maxWidth="lg"
+        closeOnBackdropClick={false}
+      >
+        <ConfirmarVenta
+          items={canasta}
+          cliente={cliente}
+          onCancelar={() => setConfirmando(false)}
+          onConfirmada={(venta, cambio) => {
+            descontarStock(
+              canasta.map((item) => ({ id: item.producto.id, cantidad: item.cantidad })),
+            );
+            setConfirmando(false);
+            setCanasta([]);
+            setCliente(null);
+            setRecuperada(null);
+            setBusqueda("");
+            mostrarAlerta(
+              `Venta #${venta.idVenta} registrada por ${formatoMoneda.format(venta.total)}.` +
+              (cambio > 0 ? ` Cambio: ${formatoMoneda.format(cambio)}.` : ""),
+              "exito",
+            );
+          }}
+        />
+      </Modal>
+
+      {/* SCRUM-123 (Camilo) — Modal de búsqueda rápida por Cédula/NIT. */}
+      <SeleccionarCliente
+        key={aperturasCliente}
+        abierto={eligiendoCliente}
+        onCerrar={() => setEligiendoCliente(false)}
+        onSeleccionar={(elegido) => {
+          setCliente(elegido);
+          setEligiendoCliente(false);
+        }}
+      />
     </main>
   );
 }

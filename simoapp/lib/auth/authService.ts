@@ -12,11 +12,16 @@
 //  - Si el login recibe `email` (así está hoy) o `correo`.
 //  - Los id de cada rol: acá se asume el orden en que los inserta la
 //    migración 002_seguridad.sql (no existe un endpoint que los liste).
+//  - SCRUM-21: editar usuario y cambiar su estado todavía no existen en el
+//    backend. Se propone PUT /api/users/:id y PATCH /api/users/:id/estado
+//    (ver editarUsuario y cambiarEstadoUsuario, más abajo).
 
 import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
 import {
+  cambiarEstadoUsuarioMock,
   crearUsuarioMock,
+  editarUsuarioMock,
   iniciarSesionMock,
   listarUsuariosMock,
 } from "./authService.mock";
@@ -24,6 +29,7 @@ import {
   ErrorAuth,
   type CodigoRol,
   type CredencialesLogin,
+  type DatosEdicionUsuario,
   type DatosNuevoUsuario,
   type SesionIniciada,
   type TipoErrorAuth,
@@ -129,6 +135,17 @@ interface UsuarioApi {
   rol_codigo: CodigoRol;
 }
 
+function aUsuarioListado(u: UsuarioApi): UsuarioListado {
+  return {
+    id: u.id_usuario,
+    nombreCompleto: u.nombre_completo,
+    correo: u.correo,
+    usuario: u.usuario,
+    rol: u.rol_codigo,
+    activo: u.estado,
+  };
+}
+
 // Lista de usuarios para la tabla de /usuarios. El backend entrega máximo
 // 100 por petición; se pide esa primera página completa y la tabla pagina
 // en el navegador. Si algún día hay más de 100 usuarios, habrá que pedir
@@ -138,16 +155,66 @@ export async function listarUsuarios(): Promise<UsuarioListado[]> {
 
   try {
     const { data } = await apiClient.get("/users", { params: { limit: 100 } });
-    return (data.data as UsuarioApi[]).map((u) => ({
-      id: u.id_usuario,
-      nombreCompleto: u.nombre_completo,
-      correo: u.correo,
-      usuario: u.usuario,
-      rol: u.rol_codigo,
-      activo: u.estado,
-    }));
+    return (data.data as UsuarioApi[]).map(aUsuarioListado);
   } catch (error) {
     throw aErrorAuth(error, { 401: "sin_permiso", 403: "sin_permiso" });
+  }
+}
+
+// SCRUM-21 (Camilo) — Guarda los cambios del modal "Editar usuario".
+// CONTRATO PROPUESTO (el backend todavía no tiene este endpoint):
+//   PUT /api/users/:id
+//   body: { id_rol, nombre_completo, correo, usuario }   (sin contraseña)
+//   200 → { message, usuario: { ...mismas columnas que GET /api/users } }
+//   400 dato inválido · 404 no existe · 409 correo/usuario de otro usuario
+export async function editarUsuario(
+  id: number,
+  datos: DatosEdicionUsuario,
+): Promise<UsuarioListado> {
+  if (USAR_MOCK) return editarUsuarioMock(id, datos);
+
+  try {
+    const { data } = await apiClient.put(`/users/${id}`, {
+      id_rol: ID_ROL[datos.rol],
+      nombre_completo: datos.nombreCompleto.trim(),
+      correo: datos.correo.trim().toLowerCase(),
+      usuario: datos.usuario.trim(),
+    });
+    return aUsuarioListado(data.usuario);
+  } catch (error) {
+    throw aErrorAuth(error, {
+      400: "datos_invalidos",
+      401: "sin_permiso",
+      403: "sin_permiso",
+      404: "no_encontrado",
+      409: "duplicado",
+    });
+  }
+}
+
+// SCRUM-21 (Camilo) — Activa o desactiva un usuario (no lo borra).
+// CONTRATO PROPUESTO (el backend todavía no tiene este endpoint):
+//   PATCH /api/users/:id/estado
+//   body: { estado: true | false }
+//   200 → { message, usuario: { ...mismas columnas que GET /api/users } }
+export async function cambiarEstadoUsuario(
+  id: number,
+  activo: boolean,
+): Promise<UsuarioListado> {
+  if (USAR_MOCK) return cambiarEstadoUsuarioMock(id, activo);
+
+  try {
+    const { data } = await apiClient.patch(`/users/${id}/estado`, {
+      estado: activo,
+    });
+    return aUsuarioListado(data.usuario);
+  } catch (error) {
+    throw aErrorAuth(error, {
+      400: "datos_invalidos",
+      401: "sin_permiso",
+      403: "sin_permiso",
+      404: "no_encontrado",
+    });
   }
 }
 
@@ -167,6 +234,8 @@ export function mensajeDeError(error: unknown): string {
       return "Ya existe un usuario con ese correo o nombre de usuario.";
     case "sin_permiso":
       return "No tienes permiso para hacer esto. Inicia sesión como Administrador.";
+    case "no_encontrado":
+      return "Ese usuario ya no existe. Recarga la lista.";
     case "datos_invalidos":
       return error.message || "Hay datos inválidos. Revisa el formulario.";
     case "sin_conexion":

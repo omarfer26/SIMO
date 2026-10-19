@@ -6,7 +6,12 @@
 // Cada función devuelve un objeto { campo: "mensaje" } solo con los campos
 // que tienen error. Si el objeto queda vacío, el formulario es válido.
 
-import type { CodigoRol, CredencialesLogin, DatosNuevoUsuario } from "./tipos";
+import type {
+  CodigoRol,
+  CredencialesLogin,
+  DatosEdicionUsuario,
+  DatosNuevoUsuario,
+} from "./tipos";
 
 // Mismo mínimo que exige el backend en POST /api/users.
 export const PASSWORD_MINIMO = 8;
@@ -64,6 +69,27 @@ export function validarLogin(
 // backend: la confirmación de la contraseña.
 export type CamposNuevoUsuario = keyof DatosNuevoUsuario | "confirmarPassword";
 
+// SCRUM-21 (Camilo) — Reglas de los campos que comparten "Crear usuario" y
+// "Editar usuario" (nombre, correo, usuario y rol). Antes estaban solo dentro
+// de validarNuevoUsuario; se sacaron acá para que los dos formularios
+// validen exactamente igual.
+function erroresDatosUsuario(
+  datos: Omit<DatosEdicionUsuario, "rol"> & { rol: CodigoRol | "" },
+) {
+  return {
+    nombreCompleto: datos.nombreCompleto.trim()
+      ? undefined
+      : "Escribe el nombre completo.",
+    correo: errorCorreo(datos.correo),
+    usuario: datos.usuario.trim()
+      ? /\s/.test(datos.usuario.trim())
+        ? "El nombre de usuario no puede tener espacios."
+        : undefined
+      : "Escribe un nombre de usuario.",
+    rol: datos.rol ? undefined : "Selecciona un rol.",
+  };
+}
+
 export function validarNuevoUsuario(
   datos: Omit<DatosNuevoUsuario, "rol"> & {
     rol: CodigoRol | "";
@@ -78,17 +104,16 @@ export function validarNuevoUsuario(
   }
 
   return soloConError({
-    nombreCompleto: datos.nombreCompleto.trim()
-      ? undefined
-      : "Escribe el nombre completo.",
-    correo: errorCorreo(datos.correo),
-    usuario: datos.usuario.trim()
-      ? /\s/.test(datos.usuario.trim())
-        ? "El nombre de usuario no puede tener espacios."
-        : undefined
-      : "Escribe un nombre de usuario.",
-    rol: datos.rol ? undefined : "Selecciona un rol.",
+    ...erroresDatosUsuario(datos),
     password: errorPassword(datos.password),
     confirmarPassword,
   });
+}
+
+// SCRUM-21 (Camilo) — Validación del modal "Editar usuario": las mismas
+// reglas de crear, sin la contraseña.
+export function validarEdicionUsuario(
+  datos: DatosEdicionUsuario,
+): Errores<keyof DatosEdicionUsuario> {
+  return soloConError(erroresDatosUsuario(datos));
 }

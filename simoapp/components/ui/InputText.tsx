@@ -5,13 +5,16 @@
 // le pasa `error`, el borde se pone rojo y el mensaje aparece debajo.
 // `className` va al contenedor del campo completo (no a la caja), para
 // ubicarlo en una grilla, por ejemplo `md:col-span-2`.
+//
+// SCRUM-125 (Camilo) — Ahora también acepta type="date" (el selector de
+// fechas del navegador), para el filtro Desde/Hasta de Pedidos.
 
 import { useId, type ComponentProps } from "react";
 import Campo, { clasesControl, propsAccesibilidad, type PropsCampo } from "./Campo";
 
 type InputTextProps = Omit<ComponentProps<"input">, "type"> &
   PropsCampo & {
-    type?: "text" | "email" | "password" | "tel" | "search" | "url";
+    type?: "text" | "email" | "password" | "tel" | "search" | "url" | "date";
   };
 
 export default function InputText({
@@ -42,7 +45,9 @@ export default function InputText({
         id={idCampo}
         type={type}
         {...propsAccesibilidad(idCampo, error, hint)}
-        className={`${clasesControl(Boolean(error))} px-3`}
+        // SCRUM-125 — En modo oscuro, el ícono y el calendario del
+        // type="date" también se pintan oscuros (si no, el ícono no se ve).
+        className={`${clasesControl(Boolean(error))} px-3 dark:[color-scheme:dark]`}
       />
     </Campo>
   );
