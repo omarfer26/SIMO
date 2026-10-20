@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const xss = require('xss-clean');
 const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
+const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -50,6 +51,7 @@ app.use('/api', limiter);
 app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
 app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
+app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
