@@ -20,6 +20,8 @@ db/
 │   └── 012_saldo_kardex.sql    fn_kardex_producto y fn_validar_kardex (SCRUM-132)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
+├── carga/
+│   └── poblar_masivo.sql     datos masivos coherentes para pruebas de carga (SCRUM-131)
 └── tests/
     ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
     ├── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
@@ -126,3 +128,28 @@ SELECT * FROM fn_kardex_producto(1, '2026-10-01', '2026-10-31');
 -- Auditoría: ¿el saldo del Kardex coincide con el stock de cada producto?
 SELECT * FROM fn_validar_kardex() WHERE NOT consistente;
 ```
+
+## Población masiva para pruebas de carga (SCRUM-131)
+
+`carga/poblar_masivo.sql` genera productos, clientes y ventas simuladas **respetando
+las reglas del sistema**: el stock entra por compra a Bodega, una parte se traslada al
+Almacén y cada línea de venta descuenta primero del Almacén y luego de Bodega
+(deducción en cascada, RN-02) con su movimiento `SALIDA_VENTA` y el saldo correcto.
+Las ventas se reparten en los últimos 12 meses (70 % con cliente, 10 % con descuento).
+Al final ejecuta `fn_validar_kardex()` y revierte todo si algún producto queda inconsistente.
+
+```bash
+# sobre una base local con migraciones y seed aplicados
+psql -d simo_retail -v productos=2000 -v clientes=5000 -v ventas=50000 -f db/carga/poblar_masivo.sql
+```
+
+| Parámetros | Productos | Clientes | Ventas | Líneas | Movimientos | Tiempo |
+|---|---|---|---|---|---|---|
+| 1.000 / 2.000 / 10.000 | 1.000 | 2.000 | 10.000 | ~30.000 | ~32.600 | ~5 s |
+| 2.000 / 5.000 / 50.000 | 2.000 | 5.000 | 49.996 | ~150.000 | ~155.200 | ~22 s |
+
+- Los datos son reproducibles (`setseed`) y se reconocen por el SKU `CARGA-…`, documentos
+  de cliente `99…` y movimientos con documento `CARGA-…`.
+- Como el Kardex es inalterable, estos datos **no se pueden borrar**: el script se niega a
+  correr dos veces en la misma base y a correr en la base compartida de Neon (`neondb`)
+  salvo que se pase `-v forzar=si`. Úselo en una base local o en una rama de Neon.

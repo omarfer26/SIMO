@@ -100,15 +100,15 @@ SELECT pg_temp.debe_fallar('Total que no cuadra',
       VALUES (4, 1, 100, 10, 0, 100)$$);
 SELECT pg_temp.debe_pasar('Venta completada',
     $$INSERT INTO ventas (id_venta, id_usuario, id_metodo_pago, subtotal, total)
-      VALUES (1000, 4, 1, 89900, 89900)$$);
+      VALUES (9000001, 4, 1, 89900, 89900)$$);
 SELECT pg_temp.debe_fallar('Subtotal de línea mal calculado',
     $$INSERT INTO detalles_ventas (id_venta, id_producto, cantidad, precio_unitario, costo_unitario, subtotal_linea)
-      VALUES (1000, 1, 2, 89900, 58400, 89900)$$);
+      VALUES (9000001, 1, 2, 89900, 58400, 89900)$$);
 SELECT pg_temp.debe_fallar('Anulación sin autorizador ni motivo (CU-11)',
-    $$UPDATE ventas SET estado = 'ANULADA', anulada_en = now(), anulada_por = 4 WHERE id_venta = 1000$$);
+    $$UPDATE ventas SET estado = 'ANULADA', anulada_en = now(), anulada_por = 4 WHERE id_venta = 9000001$$);
 SELECT pg_temp.debe_pasar('Anulación completa',
     $$UPDATE ventas SET estado = 'ANULADA', anulada_en = now(), anulada_por = 4,
-          autorizada_por = 2, motivo_anulacion = 'Cliente devolvió el producto' WHERE id_venta = 1000$$);
+          autorizada_por = 2, motivo_anulacion = 'Cliente devolvió el producto' WHERE id_venta = 9000001$$);
 
 -- ------------------------------ Pedidos --------------------------------
 SELECT pg_temp.debe_fallar('Pedido que no inicia en REGISTRADO',
@@ -156,10 +156,10 @@ SELECT pg_temp.debe_fallar('Ajuste auditado sin justificación',
     $$INSERT INTO log_auditoria (id_usuario, accion, entidad, id_entidad) VALUES (3, 'AJUSTE_INVENTARIO', 'productos', 1)$$);
 SELECT pg_temp.debe_fallar('Anulación auditada sin autorizador',
     $$INSERT INTO log_auditoria (id_usuario, accion, entidad, id_entidad, justificacion)
-      VALUES (4, 'ANULACION_VENTA', 'ventas', 1000, 'Motivo')$$);
+      VALUES (4, 'ANULACION_VENTA', 'ventas', 9000001, 'Motivo')$$);
 SELECT pg_temp.debe_pasar('Registro de auditoría válido',
     $$INSERT INTO log_auditoria (id_usuario, id_usuario_autorizador, accion, entidad, id_entidad, justificacion, datos_anteriores, datos_nuevos)
-      VALUES (4, 2, 'ANULACION_VENTA', 'ventas', 1000, 'Cliente devolvió el producto',
+      VALUES (4, 2, 'ANULACION_VENTA', 'ventas', 9000001, 'Cliente devolvió el producto',
               '{"estado":"COMPLETADA"}', '{"estado":"ANULADA"}')$$);
 SELECT pg_temp.debe_fallar('Auditoría inalterable: UPDATE',
     $$UPDATE log_auditoria SET justificacion = 'otra'$$);
