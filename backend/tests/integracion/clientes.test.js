@@ -12,7 +12,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
-const pool = require('../src/config/db');
+const pool = require('../../src/config/db');
 
 const PORT = process.env.TEST_PORT_CLIENTES || 3997;
 const BASE = `http://localhost:${PORT}/api/customers`;
@@ -33,7 +33,7 @@ const editar = (id, cuerpo) => api(`/${id}`, { method: 'PUT', body: JSON.stringi
 async function preparar() {
     ref.vendedor = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'vendedor'`)).rows[0].id_usuario;
     ref.gerente = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'gerente'`)).rows[0].id_usuario;
-    servidor = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
+    servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
         env: { ...process.env, PORT: String(PORT) },
         stdio: ['ignore', 'pipe', 'inherit'],
     });

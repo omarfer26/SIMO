@@ -12,7 +12,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
-const pool = require('../src/config/db');
+const pool = require('../../src/config/db');
 
 const PORT = process.env.TEST_PORT_INVENTARIO || 3998;
 const URL = `http://localhost:${PORT}/api/inventory/entries`;
@@ -58,7 +58,7 @@ async function preparar() {
     ref.usuario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
     ref.proveedor = (await pool.query(`SELECT min(id_proveedor) AS id FROM proveedores`)).rows[0].id;
 
-    servidor = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
+    servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
         env: { ...process.env, PORT: String(PORT) },
         stdio: ['ignore', 'pipe', 'inherit'],
     });

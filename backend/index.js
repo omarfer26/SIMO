@@ -9,7 +9,7 @@ const ventasRoutes = require('./routes/ventasRoutes');
 // Módulos de seguridad (SCRUM-127)
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
-const xss = require('xss-clean');
+const { sanitizarXss } = require('./middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
 const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
 const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
 
@@ -28,12 +28,13 @@ app.use(cors());
 app.use(express.json());
 
 // 2. Sanitización contra XSS (Cross-Site Scripting)
-app.use(xss());
+app.use(sanitizarXss);
 
 // 3. Rate Limiting: Limitar a 100 peticiones por minuto por IP
 const limiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1 minuto
-    max: 100, // Límite máximo de peticiones
+    // 100 por defecto; RATE_LIMIT_MAX permite subirlo en las pruebas de integración
+    max: Number(process.env.RATE_LIMIT_MAX) || 100, // Límite máximo de peticiones
     standardHeaders: true,
     legacyHeaders: false,
     message: {

@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const bcrypt = require('bcrypt');
-const pool = require('../src/config/db');
+const pool = require('../../src/config/db');
 
 const PORT = process.env.TEST_PORT || 3999;
 const BASE = `http://localhost:${PORT}/api/users`;
@@ -39,7 +39,7 @@ function nuevoUsuario(extra = {}) {
 }
 
 async function iniciarServidor() {
-    servidor = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
+    servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
         env: { ...process.env, PORT: String(PORT) },
         stdio: ['ignore', 'pipe', 'inherit'],
     });
