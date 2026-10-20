@@ -12,11 +12,13 @@ db/
 │   ├── 004_clientes_pedidos.sql clientes, pedidos, detalles, historial de estados
 │   ├── 005_ventas.sql          metodos_pago, ventas, detalles_ventas
 │   ├── 006_inventario.sql      proveedores, movimientos_inventario, vista v_kardex
-│   └── 007_auditoria.sql       log_auditoria
+│   ├── 007_auditoria.sql       log_auditoria
+│   └── 008_ingreso_bodega.sql  función fn_registrar_ingreso_bodega (HU-05)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 └── tests/
-    └── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
+    ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
+    └── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
 ```
 
 ## Cómo crear la base
@@ -98,7 +100,7 @@ erDiagram
    await client.query("SELECT set_config('simo.motivo', $1, true)", [motivo]); // al cancelar
    ```
    Si falta, la base rechaza el cambio.
-2. **El stock no se edita a mano.** `stock_bodega` y `stock_almacen` cambian solo junto con una fila en `movimientos_inventario`, en la misma transacción, bloqueando el producto con `SELECT ... FOR UPDATE` (procedimientos de SCRUM-45).
+2. **El stock no se edita a mano.** `stock_bodega` y `stock_almacen` cambian solo junto con una fila en `movimientos_inventario`, en la misma transacción, bloqueando el producto con `SELECT ... FOR UPDATE`. El ingreso a Bodega ya lo hace `fn_registrar_ingreso_bodega` (migración 008); los traslados, ventas y ajustes seguirán el mismo patrón, con errores de negocio identificados por SQLSTATE de clase `SM`.
 3. **Deducción en cascada.** Una línea de venta o pedido genera hasta dos movimientos `SALIDA_*` (primero `ALMACEN`, luego `BODEGA`). La anulación o cancelación crea un `REVERSO_*` por cada uno, hacia la misma ubicación.
 4. **Venta desde pedido.** Se inserta con `id_pedido` y **no** genera movimientos (el stock ya salió al pasar a `EN_PREPARACION`). Validar en el endpoint que el pedido esté `ENTREGADO`.
 5. **Auditoría.** Ajustes, anulaciones y cancelaciones insertan en `log_auditoria` dentro de la misma transacción.

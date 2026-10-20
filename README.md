@@ -156,3 +156,44 @@ Ejemplo: `GET /api/users?rol=VENDEDOR&estado=true&page=1&limit=10`
 Errores: `400` parámetros inválidos, `404` usuario inexistente, `409` correo o usuario duplicado (en `PUT`, si pertenecen a **otro** usuario) o intento de dejar el sistema sin administradores. Formato: `{ "error": "Bad Request", "message": "..." }`. La contraseña nunca se devuelve.
 
 **Pruebas automáticas** (requieren la base creada con el seed): `npm test`
+
+### 📦 Ingreso de mercancía a Bodega (SCRUM-94 / HU-05)
+
+> Pendiente de protección con JWT + roles `INVENTARIO` / `ADMIN` (SCRUM-16 / SCRUM-18). Mientras tanto, el usuario responsable se envía en `id_usuario`.
+
+`POST /api/inventory/entries` registra una compra a proveedor: suma **únicamente** al stock de Bodega y deja el movimiento en el Kardex, todo en una sola operación atómica.
+
+| Campo | Obligatorio | Descripción |
+| :--- | :--- | :--- |
+| `id_producto` o `sku` | Sí (uno de los dos) | Producto que ingresa; debe existir y estar activo |
+| `cantidad` | Sí | Mayor a cero; entera si el producto se maneja por unidad, hasta 3 decimales si es por kg / g / L |
+| `id_usuario` | Sí (temporal) | Usuario responsable del ingreso |
+| `costo_unitario` | No | Costo de esta compra; por defecto, el precio de compra del producto |
+| `id_proveedor` | No | Proveedor de la mercancía |
+| `documento_referencia` | No | Número de la factura o remisión del proveedor |
+| `observacion` | No | Nota libre (máx. 500 caracteres) |
+
+```json
+{ "sku": "ELEC-001", "cantidad": 10, "id_usuario": 3, "id_proveedor": 1, "documento_referencia": "FAC-0001" }
+```
+
+Respuesta `201`:
+
+```json
+{
+  "message": "Ingreso a Bodega registrado exitosamente",
+  "movimiento": { "id_movimiento": 1, "tipo_movimiento": "ENTRADA_COMPRA", "ubicacion_destino": "BODEGA",
+                  "cantidad": "10.000", "costo_unitario": "58400.00", "saldo_bodega": "10.000", "saldo_almacen": "0.000",
+                  "id_usuario": 3, "id_proveedor": 1, "documento_referencia": "FAC-0001", "observacion": null, "fecha_movimiento": "..." },
+  "producto": { "id_producto": 1, "sku": "ELEC-001", "nombre": "Audífonos Bluetooth X200",
+                "stock_bodega": "10.000", "stock_almacen": "0.000", "stock_total": "10.000" }
+}
+```
+
+Errores: `400` datos inválidos (p. ej. "La cantidad ingresada debe ser mayor a cero"), `404` producto inexistente, `409` producto inactivo.
+
+---
+
+## 🚀 Despliegue
+
+El despliegue del sistema (PostgreSQL, API, frontend, respaldos diarios y Cloudflare Tunnel) está en la carpeta `deploy/`. Ver `deploy/README.md` para la operación y `deploy/GUIA_EQUIPO.md` para conectarse a la base de datos compartida.
