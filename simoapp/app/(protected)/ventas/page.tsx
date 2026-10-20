@@ -38,10 +38,6 @@ function cuandoSeGuardo(fecha: Date) {
   return fecha.toDateString() === new Date().toDateString() ? `a las ${hora}` : `ayer a las ${hora}`;
 }
 
-"use client";
-
-import { useEffect, useRef, useState } from "react";
-
 export default function VentasPage() {
   const { productos, origen, descontarStock } = useProductos();
   const [busqueda, setBusqueda] = useState("");
@@ -258,63 +254,6 @@ export default function VentasPage() {
     0
   );
 
-  const searchRef = useRef<HTMLInputElement | null>(null);
-  const [canasta, setCanasta] = useState<{ id: number; nombre: string; precio: number; cantidad: number }[]>([
-    { id: 1, nombre: "Ejemplo: Audífonos X200", precio: 89900, cantidad: 1 },
-  ]);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      // F2 -> procesar cobro
-      if (e.key === "F2") {
-        e.preventDefault();
-        procesarCobro();
-        return;
-      }
-
-      // Esc -> limpiar canasta
-      if (e.key === "Escape") {
-        e.preventDefault();
-        limpiarCanasta();
-        return;
-      }
-
-      // F4 -> enfocar barra de búsqueda
-      if (e.key === "F4") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        return;
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canasta]);
-
-  function limpiarCanasta() {
-    setCanasta([]);
-  }
-
-  function procesarCobro() {
-    if (canasta.length === 0) {
-      alert("La canasta está vacía.");
-      return;
-    }
-    const total = canasta.reduce((s, i) => s + i.precio * i.cantidad, 0);
-    // Aquí iría la lógica real para abrir modal / redirigir a pago.
-    alert(`Procesando cobro — total: $${(total / 100).toFixed(2)} (demo)`);
-  }
-
-  function agregarProductoEjemplo() {
-    const nuevo = {
-      id: Date.now(),
-      nombre: "Producto demo",
-      precio: 15000,
-      cantidad: 1,
-    };
-    setCanasta((c) => [...c, nuevo]);
-  }
 
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8 relative">
