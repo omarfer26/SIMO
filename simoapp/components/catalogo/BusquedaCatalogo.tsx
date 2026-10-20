@@ -17,6 +17,7 @@ import type {
   FiltroEstado,
   Producto,
 } from "./tipos";
+import { Badge } from "@/components/ui/Badge";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -207,15 +208,13 @@ export default function BusquedaCatalogo({
                       {producto.codigo}
                     </p>
                   </div>
-                  <span
-                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                      producto.estado === "Activo"
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                        : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                    }`}
+                  <Badge
+                    variant={producto.estado === "Activo" ? "success" : "default"}
+                    pill
+                    size="sm"
                   >
                     {producto.estado}
-                  </span>
+                  </Badge>
                 </div>
 
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -226,17 +225,15 @@ export default function BusquedaCatalogo({
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {formatoMoneda.format(producto.precioVenta)}
                   </span>
-                  <span
-                    className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                      disponible
-                        ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
-                        : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                    }`}
+                  <Badge
+                    variant={disponible ? "info" : "danger"}
+                    pill
+                    size="sm"
                   >
                     {disponible
                       ? `Disponible (${producto.stockActual})`
                       : "Agotado"}
-                  </span>
+                  </Badge>
                 </div>
               </li>
             );

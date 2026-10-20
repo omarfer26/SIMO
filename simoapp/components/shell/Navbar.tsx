@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { cerrarSesion } from "@/lib/auth/sesion";
 import { empresaMock, usuarioMock } from "./datos.mock";
 
 function iniciales(nombre: string) {
@@ -25,6 +26,14 @@ interface NavbarProps {
 
 export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
   const [menuUsuarioAbierto, setMenuUsuarioAbierto] = useState(false);
+
+  // SCRUM-loginMejora (Camilo) — Antes solo se borraba localStorage, pero la sesión
+  // vive en cookies: la cookie seguía viva y middleware.ts devolvía al
+  // inicio. Ahora se borran las cookies y se recarga hacia /login.
+  const handleLogout = () => {
+    cerrarSesion();
+    window.location.href = "/login";
+  };
 
   return (
     <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950">
@@ -95,7 +104,7 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
               <button
                 type="button"
                 className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                onClick={() => setMenuUsuarioAbierto(false)}
+                onClick={handleLogout}
               >
                 Cerrar sesión
               </button>
