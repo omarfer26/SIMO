@@ -5,8 +5,10 @@ const jwt = require('jsonwebtoken');
 const pool = require('./db');
 const usuariosRoutes = require('./routes/usuariosRoutes');
 const ventasRoutes = require('./routes/ventasRoutes');
+const errorHandler = require('./middleware/errorHandler');
+const reservasRoutes = require('./routes/reservasRoutes');
+const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
 
-// Módulos de seguridad (SCRUM-127)
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const xss = require('xss-clean');
@@ -40,6 +42,10 @@ const limiter = rateLimit({
     }
 });
 
+// Tus enrutadores actuales
+app.use('/api/sales', ventasRoutes);
+app.use('/api/users', usuariosRoutes);
+
 // Aplicar el limitador a todas las rutas de la API
 app.use('/api', limiter);
 
@@ -48,6 +54,7 @@ app.use('/api', limiter);
 // =====================================================================
 app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
+app.use('/api/reservations', reservasRoutes);
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
@@ -446,9 +453,18 @@ app.post('/api/auth/logout', async (req, res) => {
     }
 });
 
-// =====================================================================
-// INICIALIZACIÓN DEL SERVIDOR
-// =====================================================================
+// 1. Capturador para rutas inexistentes (Error 404)
+app.use('*', (req, res, next) => {
+    const error = new Error(`La ruta solicitada no existe: ${req.originalUrl}`);
+    error.statusCode = 404;
+    next(error); // Pasa el error al middleware global
+});
+
+// 2. Middleware Global de Manejo de Errores (DEBE SER EL ÚLTIMO app.use)
+app.use(errorHandler);
+// Iniciar procesos en segundo plano
+iniciarLimpiezaDeReservas();
+
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
 });
