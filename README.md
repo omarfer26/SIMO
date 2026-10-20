@@ -193,6 +193,23 @@ Respuesta `201`:
 
 Errores: `400` datos inválidos (p. ej. "La cantidad ingresada debe ser mayor a cero"), `404` producto inexistente, `409` producto inactivo.
 
+### 🧾 Compras a proveedor (SCRUM-45)
+
+> Protegido con JWT; roles `INVENTARIO` / `ADMIN` (consulta también `GERENTE`).
+
+`POST /api/inventory/purchases` registra una compra con varias líneas y, por defecto, la **confirma**: todas las líneas ingresan a Bodega en una sola operación con el procedimiento `sp_confirmar_compra`. Si una línea es inválida no se registra nada.
+
+```json
+{ "id_proveedor": 1, "documento_referencia": "FAC-0001",
+  "lineas": [ { "sku": "ELEC-001", "cantidad": 10, "costo_unitario": 58000 }, { "id_producto": 3, "cantidad": 2.5 } ] }
+```
+
+- `confirmar: false` la deja en `BORRADOR` sin mover el stock.
+- Sin `costo_unitario`, la línea usa el precio de compra del producto.
+- `GET /api/inventory/purchases/:id` devuelve la compra con sus líneas y el stock actual de cada producto.
+- Errores: `400` datos inválidos o producto repetido, `404` producto o compra inexistente, `409` producto inactivo.
+- Una compra confirmada no se puede modificar (lo impide la base de datos).
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).

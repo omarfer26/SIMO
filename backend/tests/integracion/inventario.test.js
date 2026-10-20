@@ -58,6 +58,8 @@ async function preparar() {
     ref.kilo = await crearProducto(`TEST-K-${SUFIJO}`, 'kg');
     ref.inactivo = await crearProducto(`TEST-I-${SUFIJO}`, 'und', false);
     ref.concurrente = await crearProducto(`TEST-C-${SUFIJO}`, 'und');
+    ref.compraUnd = await crearProducto(`TEST-PU-${SUFIJO}`, 'und');
+    ref.compraKg = await crearProducto(`TEST-PK-${SUFIJO}`, 'kg');
     ref.usuario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
     ref.proveedor = (await pool.query(`SELECT min(id_proveedor) AS id FROM proveedores`)).rows[0].id;
 
@@ -194,6 +196,90 @@ caso('25 ingresos simultáneos sobre el mismo producto no pierden unidades', asy
     // Cada movimiento debe haber visto un saldo distinto: 2, 4, ..., 50
     const saldos = respuestas.map((r) => Number(r.body.movimiento.saldo_bodega)).sort((a, b) => a - b);
     assert.deepEqual(saldos, Array.from({ length: N }, (_, i) => (i + 1) * 2));
+});
+
+// --------------------------------- Compras (SCRUM-45) ---------------------------------
+
+const URL_COMPRAS = `http://localhost:${PORT}/api/inventory/purchases`;
+async function comprar(cuerpo, tokenSesion = token) {
+    const res = await fetch(URL_COMPRAS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(tokenSesion ? { Authorization: `Bearer ${tokenSesion}` } : {}) },
+        body: JSON.stringify(cuerpo),
+    });
+    return { status: res.status, body: await res.json() };
+}
+async function verCompra(id) {
+    const res = await fetch(`${URL_COMPRAS}/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, body: await res.json() };
+}
+
+caso('Compra con varias líneas: se confirma y todo ingresa a Bodega en una operación', async () => {
+    const { status, body } = await comprar({
+        id_proveedor: ref.proveedor,
+        documento_referencia: `FAC-${SUFIJO}`,
+        lineas: [
+            { id_producto: ref.compraUnd, cantidad: 12, costo_unitario: 1500 },
+            { sku: `TEST-PK-${SUFIJO}`, cantidad: 3.25 },
+        ],
+    });
+    assert.equal(status, 201);
+    assert.equal(body.compra.estado, 'CONFIRMADA');
+    assert.equal(body.compra.lineas.length, 2);
+    assert.equal(Number(body.compra.total), 12 * 1500 + 3.25 * 1000); // sin costo: precio de compra (1000)
+    assert.deepEqual(await stock(ref.compraUnd), { bodega: 12, almacen: 0 });
+    assert.deepEqual(await stock(ref.compraKg), { bodega: 3.25, almacen: 0 });
+    const { rows } = await pool.query(
+        'SELECT count(*)::int AS n, bool_and(id_usuario = $2) AS responsable FROM movimientos_inventario WHERE id_compra = $1',
+        [body.compra.id_compra, ref.usuario]
+    );
+    assert.deepEqual(rows[0], { n: 2, responsable: true });
+    ref.compra = body.compra.id_compra;
+});
+
+caso('Consulta la compra con sus líneas', async () => {
+    const { status, body } = await verCompra(ref.compra);
+    assert.equal(status, 200);
+    assert.equal(body.documento_referencia, `FAC-${SUFIJO}`);
+    assert.deepEqual(body.lineas.map((l) => l.sku).sort(), [`TEST-PK-${SUFIJO}`, `TEST-PU-${SUFIJO}`].sort());
+    assert.equal((await verCompra(99999999)).status, 404);
+});
+
+caso('Compra en borrador: no mueve el stock', async () => {
+    const { status, body } = await comprar({ confirmar: false, lineas: [{ id_producto: ref.compraUnd, cantidad: 5 }] });
+    assert.equal(status, 201);
+    assert.equal(body.compra.estado, 'BORRADOR');
+    assert.deepEqual(await stock(ref.compraUnd), { bodega: 12, almacen: 0 });
+});
+
+caso('Si una línea es inválida no se registra nada (atomicidad)', async () => {
+    const antes = (await pool.query('SELECT count(*)::int AS n FROM compras')).rows[0].n;
+    const { status } = await comprar({
+        lineas: [
+            { id_producto: ref.compraKg, cantidad: 1 },
+            { id_producto: ref.compraUnd, cantidad: 1.5 }, // decimal en producto por unidad
+        ],
+    });
+    assert.equal(status, 400);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM compras')).rows[0].n, antes);
+    assert.deepEqual(await stock(ref.compraKg), { bodega: 3.25, almacen: 0 });
+});
+
+caso('Valida las líneas de la compra (400/404) y el producto inactivo (409)', async () => {
+    assert.equal((await comprar({ lineas: [] })).status, 400);
+    assert.equal((await comprar({})).status, 400);
+    assert.equal((await comprar({ lineas: [{ id_producto: ref.compraUnd, cantidad: 0 }] })).status, 400);
+    assert.equal((await comprar({ lineas: [{ id_producto: ref.compraUnd, cantidad: 1 }, { id_producto: ref.compraUnd, cantidad: 2 }] })).status, 400);
+    assert.equal((await comprar({ lineas: [{ id_producto: 99999999, cantidad: 1 }] })).status, 404);
+    assert.equal((await comprar({ lineas: [{ sku: 'NO-EXISTE-XYZ', cantidad: 1 }] })).status, 404);
+    assert.equal((await comprar({ id_proveedor: 99999999, lineas: [{ id_producto: ref.compraUnd, cantidad: 1 }] })).status, 400);
+    assert.equal((await comprar({ lineas: [{ id_producto: ref.inactivo, cantidad: 1 }] })).status, 409);
+});
+
+caso('Compras: exige sesión y rol INVENTARIO o ADMIN', async () => {
+    assert.equal((await comprar({ lineas: [{ id_producto: ref.compraUnd, cantidad: 1 }] }, null)).status, 401);
+    const vendedor = await iniciarSesion(PORT, 'vendedor@simo.local');
+    assert.equal((await comprar({ lineas: [{ id_producto: ref.compraUnd, cantidad: 1 }] }, vendedor)).status, 403);
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18

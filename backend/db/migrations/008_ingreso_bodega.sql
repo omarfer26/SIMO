@@ -84,7 +84,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION fn_registrar_ingreso_bodega IS
+COMMENT ON FUNCTION fn_registrar_ingreso_bodega(INTEGER, NUMERIC, INTEGER, NUMERIC, INTEGER, VARCHAR, TEXT) IS
     'Ingreso de compra a Bodega: suma stock_bodega y registra el movimiento ENTRADA_COMPRA en una sola operación (HU-005, CU-05)';
 
 COMMIT;

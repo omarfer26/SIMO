@@ -14,12 +14,15 @@ db/
 │   ├── 006_inventario.sql      proveedores, movimientos_inventario, vista v_kardex
 │   ├── 007_auditoria.sql       log_auditoria
 │   ├── 008_ingreso_bodega.sql  función fn_registrar_ingreso_bodega (HU-05)
-│   └── 009_clientes.sql        búsqueda por documento y documento inalterable (HU-09)
+│   ├── 009_clientes.sql        búsqueda por documento y documento inalterable (HU-09)
+│   ├── 010_sesiones.sql        tokens invalidados por cierre de sesión (SCRUM-17)
+│   └── 011_compras.sql         compras a proveedor y sp_confirmar_compra (SCRUM-45)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 └── tests/
     ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
-    └── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
+    ├── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
+    └── 003_compras.sql           17 pruebas de compras y sp_confirmar_compra (no deja datos)
 ```
 
 ## Cómo crear la base
