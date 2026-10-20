@@ -170,6 +170,15 @@ caso('POST valida campos, formato de correo, contraseña y rol (400)', async () 
 
 const ROL = { ADMIN: 1, GERENTE: 2, INVENTARIO: 3, VENDEDOR: 4 };
 const editar = (id, cuerpo) => api(`/${id}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
+// Igual que editar(), pero con la sesión de otro usuario
+async function editarCon(tokenSesion, id, cuerpo) {
+    const res = await fetch(`${BASE}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenSesion}` },
+        body: JSON.stringify(cuerpo),
+    });
+    return { status: res.status, body: await res.json() };
+}
 async function crearDePrueba(sufijo, idRol = ROL.VENDEDOR) {
     const { status, body } = await api('', {
         method: 'POST',
@@ -248,10 +257,12 @@ caso('PUT no deja quitar el rol de Administrador al último administrador activo
 caso('Dos administradores que se quitan el rol al mismo tiempo: queda al menos uno', async () => {
     const a = await crearDePrueba('admina', ROL.ADMIN);
     const b = await crearDePrueba('adminb', ROL.ADMIN);
-    // Por un momento, los únicos administradores activos son a y b (se restaura al terminar)
+    // La sesión la abre el administrador "a": el del seed se inactiva un momento,
+    // para que los únicos administradores activos sean a y b (se restaura al terminar)
+    const tokenA = await iniciarSesion(PORT, `admina${SUFIJO}@simo.local`, 'ClaveSegura1');
     await pool.query(`UPDATE usuarios SET estado = FALSE WHERE usuario = 'admin'`);
     try {
-        const respuestas = await Promise.all([editar(a, { id_rol: ROL.VENDEDOR }), editar(b, { id_rol: ROL.VENDEDOR })]);
+        const respuestas = await Promise.all([editarCon(tokenA, a, { id_rol: ROL.VENDEDOR }), editarCon(tokenA, b, { id_rol: ROL.VENDEDOR })]);
         assert.deepEqual(respuestas.map((r) => r.status).sort(), [200, 409]);
         const { rows } = await pool.query(
             `SELECT count(*)::int AS n FROM usuarios u JOIN roles r USING (id_rol)
@@ -260,8 +271,61 @@ caso('Dos administradores que se quitan el rol al mismo tiempo: queda al menos u
         );
         assert.equal(rows[0].n, 1);
     } finally {
+        // Deja todo como estaba: solo el administrador del seed activo
         await pool.query(`UPDATE usuarios SET estado = TRUE WHERE usuario = 'admin'`);
+        await pool.query('UPDATE usuarios SET estado = FALSE WHERE id_usuario IN ($1, $2)', [a, b]);
     }
+});
+
+// ------------------------------- PATCH /api/users/:id/status (SCRUM-25) ------------------------------
+
+const cambiarEstado = (id, cuerpo, ruta = 'status') => api(`/${id}/${ruta}`, { method: 'PATCH', body: JSON.stringify(cuerpo) });
+
+caso('PATCH inactiva y reactiva un usuario con el contrato del frontend (SCRUM-21)', async () => {
+    const id = await crearDePrueba('estado');
+    const inactivo = await cambiarEstado(id, { estado: false });
+    assert.equal(inactivo.status, 200);
+    assert.equal(inactivo.body.message, 'Usuario inactivado exitosamente');
+    assert.equal(inactivo.body.usuario.estado, false);
+    for (const campo of ['id_usuario', 'nombre_completo', 'correo', 'usuario', 'estado', 'rol_codigo']) {
+        assert.ok(inactivo.body.usuario[campo] !== undefined, `falta ${campo}`);
+    }
+    // La ruta /estado (la que usa el frontend) hace lo mismo
+    const activo = await cambiarEstado(id, { estado: true }, 'estado');
+    assert.equal(activo.status, 200);
+    assert.equal(activo.body.usuario.estado, true);
+});
+
+caso('PATCH valida el cuerpo (400) y responde 404 si el usuario no existe', async () => {
+    const id = await crearDePrueba('estadoval');
+    for (const cuerpo of [{}, { estado: 'false' }, { estado: 0 }, { estado: null }]) {
+        assert.equal((await cambiarEstado(id, cuerpo)).status, 400, JSON.stringify(cuerpo));
+    }
+    assert.equal((await cambiarEstado(99999999, { estado: false })).status, 404);
+    assert.equal((await cambiarEstado('abc', { estado: false })).status, 400);
+});
+
+caso('PATCH no deja inactivar al último administrador activo', async () => {
+    const { rows } = await pool.query(
+        `SELECT u.id_usuario FROM usuarios u JOIN roles r USING (id_rol) WHERE r.codigo = 'ADMIN' AND u.estado`
+    );
+    assert.equal(rows.length, 1, 'la prueba asume un solo administrador activo (el del seed)');
+    const { status, body } = await cambiarEstado(rows[0].id_usuario, { estado: false });
+    assert.equal(status, 409);
+    assert.match(body.message, /último administrador/);
+});
+
+caso('Inactivar corta la sesión abierta y bloquea el login; reactivar lo devuelve', async () => {
+    const id = await crearDePrueba('sesion', ROL.GERENTE);
+    const correo = `sesion${SUFIJO}@simo.local`;
+    const tokenGerente = await iniciarSesion(PORT, correo, 'ClaveSegura1');
+    const conSesion = () => fetch(BASE, { headers: { Authorization: `Bearer ${tokenGerente}` } }).then((r) => r.status);
+    assert.equal(await conSesion(), 200);
+    await cambiarEstado(id, { estado: false });
+    assert.equal(await conSesion(), 401);
+    await assert.rejects(iniciarSesion(PORT, correo, 'ClaveSegura1'), /403/);
+    await cambiarEstado(id, { estado: true });
+    assert.equal(await conSesion(), 200);
 });
 
 // ------------------- Contrato con el frontend (simoapp/lib/auth/authService.ts) -------------------

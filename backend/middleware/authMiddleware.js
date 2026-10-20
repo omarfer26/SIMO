@@ -27,9 +27,17 @@ const verificarToken = async (req, res, next) => {
     }
 
     try {
-        const { rows } = await pool.query('SELECT 1 FROM jwt_blacklist WHERE token = $1', [token]);
-        if (rows.length > 0) {
+        const { rows } = await pool.query(
+            `SELECT EXISTS (SELECT 1 FROM jwt_blacklist WHERE token = $1) AS cerrada,
+                    (SELECT estado FROM usuarios WHERE id_usuario = $2) AS activo`,
+            [token, decoded.id_usuario]
+        );
+        if (rows[0].cerrada) {
             return res.status(401).json({ error: "Unauthorized", message: "La sesión fue cerrada. Inicie sesión nuevamente." });
+        }
+        // SCRUM-25: un usuario inactivado pierde el acceso de inmediato, aunque su token no haya expirado
+        if (rows[0].activo !== true) {
+            return res.status(401).json({ error: "Unauthorized", message: "Su cuenta se encuentra inactiva. Comuníquese con el Administrador." });
         }
     } catch (error) {
         console.error('Error al verificar la lista de tokens invalidados:', error);

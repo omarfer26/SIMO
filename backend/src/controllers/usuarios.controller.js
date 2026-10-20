@@ -10,6 +10,7 @@ const {
     obtenerUsuarioPorId,
     buscarDuplicadoDeOtro,
     actualizarUsuario,
+    cambiarEstadoUsuario,
 } = require('../repositories/usuarios.repository');
 
 const SALT_ROUNDS = 10;
@@ -253,4 +254,41 @@ async function putUsuario(req, res) {
     }
 }
 
-module.exports = { postUsuario, getUsuarios, getUsuarioPorId, putUsuario };
+// =====================================================================
+// PATCH /api/users/:id/status   (SCRUM-25; alias /api/users/:id/estado,
+// la ruta que propuso el frontend para SCRUM-21)
+// Body: { estado: true | false }. Inactivar no borra al usuario: le impide
+// iniciar sesión y corta de inmediato las sesiones abiertas.
+// =====================================================================
+async function patchEstadoUsuario(req, res) {
+    try {
+        const { id } = req.params;
+        if (!REGEX_ENTERO_POSITIVO.test(id)) {
+            return badRequest(res, 'El id de usuario debe ser un entero positivo.');
+        }
+        const { estado } = req.body || {};
+        if (typeof estado !== 'boolean') {
+            return badRequest(res, "El campo 'estado' es obligatorio y debe ser true o false.");
+        }
+
+        const resultado = await cambiarEstadoUsuario(Number(id), estado);
+        if (resultado.noExiste) {
+            return res.status(404).json({ error: 'Not Found', message: `No existe el usuario con id ${id}.` });
+        }
+        if (resultado.ultimoAdmin) {
+            return res.status(409).json({
+                error: 'Conflict',
+                message: 'No se puede inactivar al último administrador activo.',
+            });
+        }
+        return res.status(200).json({
+            message: estado ? 'Usuario activado exitosamente' : 'Usuario inactivado exitosamente',
+            usuario: resultado.usuario,
+        });
+    } catch (error) {
+        console.error('[PATCH /api/users/:id/status] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al cambiar el estado del usuario.' });
+    }
+}
+
+module.exports = { postUsuario, getUsuarios, getUsuarioPorId, putUsuario, patchEstadoUsuario };

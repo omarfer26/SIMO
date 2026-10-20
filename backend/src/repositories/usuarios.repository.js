@@ -171,6 +171,64 @@ async function actualizarUsuario(idUsuario, campos) {
     }
 }
 
+// SCRUM-25: activa o inactiva un usuario. No permite inactivar al último
+// administrador activo. Usa el mismo bloqueo que el cambio de rol (SCRUM-24)
+// para que ambas operaciones no se crucen.
+// Devuelve { usuario } o { noExiste: true } o { ultimoAdmin: true }.
+async function cambiarEstadoUsuario(idUsuario, estado) {
+    const cliente = await pool.connect();
+    try {
+        await cliente.query('BEGIN');
+        await cliente.query(`SELECT pg_advisory_xact_lock(hashtext('simo.administradores'))`);
+
+        const { rows: actuales } = await cliente.query(
+            `SELECT u.id_usuario, u.estado, r.codigo AS rol_codigo
+             FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol
+             WHERE u.id_usuario = $1
+             FOR UPDATE OF u`,
+            [idUsuario]
+        );
+        if (!actuales.length) {
+            await cliente.query('ROLLBACK');
+            return { noExiste: true };
+        }
+        const actual = actuales[0];
+
+        if (!estado && actual.estado && actual.rol_codigo === 'ADMIN') {
+            const { rows: admins } = await cliente.query(
+                `SELECT count(*)::int AS n FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol
+                 WHERE r.codigo = 'ADMIN' AND u.estado AND u.id_usuario <> $1`,
+                [idUsuario]
+            );
+            if (admins[0].n === 0) {
+                await cliente.query('ROLLBACK');
+                return { ultimoAdmin: true };
+            }
+        }
+
+        // Al reactivar se limpia un posible bloqueo por intentos fallidos
+        await cliente.query(
+            `UPDATE usuarios
+             SET estado = $2,
+                 intentos_fallidos = CASE WHEN $2 THEN 0 ELSE intentos_fallidos END,
+                 bloqueado_hasta  = CASE WHEN $2 THEN NULL ELSE bloqueado_hasta END
+             WHERE id_usuario = $1`,
+            [idUsuario, estado]
+        );
+        const { rows } = await cliente.query(
+            `SELECT ${COLUMNAS_PUBLICAS} FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol WHERE u.id_usuario = $1`,
+            [idUsuario]
+        );
+        await cliente.query('COMMIT');
+        return { usuario: rows[0] };
+    } catch (error) {
+        await cliente.query('ROLLBACK').catch(() => {});
+        throw error;
+    } finally {
+        cliente.release();
+    }
+}
+
 module.exports = {
     buscarPorCorreoOUsuario,
     existeRol,
@@ -179,4 +237,5 @@ module.exports = {
     obtenerUsuarioPorId,
     buscarDuplicadoDeOtro,
     actualizarUsuario,
+    cambiarEstadoUsuario,
 };
