@@ -2,16 +2,11 @@
 // de usuarios. Los formularios llaman a iniciarSesion() y crearUsuario() sin
 // saber si detrás hay una API real o el mock.
 //
-// (Camilo, 2026-10-20) — AHORA SE USA LA API REAL POR DEFECTO: los usuarios
-// se guardan en la base de datos del backend, así todos los computadores ven
-// los mismos. Antes el mock era lo normal y cada navegador guardaba sus
-// propios usuarios en localStorage (por eso un usuario creado en un
-// computador no aparecía en otro).
-// Para volver al mock (sin backend), en simoapp/.env.local poner
-//   NEXT_PUBLIC_AUTH_MOCK=true
-// y reiniciar `npm run dev`. La dirección del backend se cambia con
-// NEXT_PUBLIC_API_URL (por defecto http://localhost:3000/api, ver
-// lib/apiClient.ts).
+// CÓMO CAMBIAR DEL MOCK A LA API REAL: crear simoapp/.env.local con
+//   NEXT_PUBLIC_AUTH_MOCK=false
+//   NEXT_PUBLIC_API_URL=http://localhost:<puerto-del-backend>/api
+// y reiniciar `npm run dev`. Mientras esa variable no sea "false" se usa el
+// mock, porque el backend de la rama back-end todavía no arranca.
 //
 // PENDIENTE DE CONFIRMAR CON BACKEND (ver camilo-sanchez.md):
 //  - Si el login recibe `email` (así está hoy) o `correo`.
@@ -42,7 +37,7 @@ import {
   type UsuarioListado,
 } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_AUTH_MOCK === "true";
+const USAR_MOCK = process.env.NEXT_PUBLIC_AUTH_MOCK !== "false";
 
 const ID_ROL: Record<CodigoRol, number> = {
   ADMIN: 1,
