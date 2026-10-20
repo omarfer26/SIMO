@@ -138,6 +138,7 @@ JSON
 | POST | `/api/users` | Crea un usuario. Body: `id_rol`, `nombre_completo`, `correo`, `usuario`, `password` (mín. 8) |
 | GET | `/api/users` | Lista paginada. Query opcional: `page`, `limit` (1-100, por defecto 10), `estado` (`true`/`false`), `id_rol`, `rol` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`), `q` (busca en nombre, correo o usuario) |
 | GET | `/api/users/:id` | Detalle de un usuario |
+| PUT | `/api/users/:id` | Edita `id_rol`, `nombre_completo`, `correo` y/o `usuario` (al menos uno). No cambia la contraseña ni el estado. No permite quitar el rol al último administrador activo (`409`) |
 
 Ejemplo: `GET /api/users?rol=VENDEDOR&estado=true&page=1&limit=10`
 
@@ -152,6 +153,6 @@ Ejemplo: `GET /api/users?rol=VENDEDOR&estado=true&page=1&limit=10`
 }
 ```
 
-Errores: `400` parámetros inválidos, `404` usuario inexistente, `409` correo o usuario duplicado. Formato: `{ "error": "Bad Request", "message": "..." }`. La contraseña nunca se devuelve.
+Errores: `400` parámetros inválidos, `404` usuario inexistente, `409` correo o usuario duplicado (en `PUT`, si pertenecen a **otro** usuario) o intento de dejar el sistema sin administradores. Formato: `{ "error": "Bad Request", "message": "..." }`. La contraseña nunca se devuelve.
 
 **Pruebas automáticas** (requieren la base creada con el seed): `npm test`

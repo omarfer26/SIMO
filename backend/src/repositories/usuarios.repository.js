@@ -96,10 +96,87 @@ async function obtenerUsuarioPorId(idUsuario) {
     return rows[0] || null;
 }
 
+// SCRUM-24: ¿el correo o el nombre de usuario ya los tiene OTRO usuario?
+async function buscarDuplicadoDeOtro(idUsuario, correo, usuario) {
+    const { rows } = await pool.query(
+        `SELECT id_usuario FROM usuarios
+         WHERE id_usuario <> $1 AND (correo = $2 OR usuario = $3)
+         LIMIT 1`,
+        [idUsuario, correo ?? null, usuario ?? null]
+    );
+    return rows[0] || null;
+}
+
+// SCRUM-24: actualiza los campos recibidos en una transacción.
+// Si cambia el rol, impide dejar el sistema sin administradores activos.
+// Devuelve { usuario } o { noExiste: true } o { ultimoAdmin: true }.
+const COLUMNAS_EDITABLES = ['id_rol', 'nombre_completo', 'correo', 'usuario'];
+
+async function actualizarUsuario(idUsuario, campos) {
+    const columnas = Object.keys(campos).filter((c) => COLUMNAS_EDITABLES.includes(c));
+    const cliente = await pool.connect();
+    try {
+        await cliente.query('BEGIN');
+
+        if (campos.id_rol !== undefined) {
+            // Pone en fila todos los cambios de rol/estado de usuarios: así dos
+            // cambios simultáneos no pueden dejar el sistema sin administradores.
+            await cliente.query(`SELECT pg_advisory_xact_lock(hashtext('simo.administradores'))`);
+        }
+
+        const { rows: actuales } = await cliente.query(
+            `SELECT u.id_usuario, u.estado, r.codigo AS rol_codigo
+             FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol
+             WHERE u.id_usuario = $1
+             FOR UPDATE OF u`,
+            [idUsuario]
+        );
+        if (!actuales.length) {
+            await cliente.query('ROLLBACK');
+            return { noExiste: true };
+        }
+        const actual = actuales[0];
+
+        if (campos.id_rol !== undefined && actual.rol_codigo === 'ADMIN' && actual.estado) {
+            const { rows: rol } = await cliente.query(`SELECT codigo FROM roles WHERE id_rol = $1`, [campos.id_rol]);
+            if (rol[0].codigo !== 'ADMIN') {
+                const { rows: admins } = await cliente.query(
+                    `SELECT count(*)::int AS n FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol
+                     WHERE r.codigo = 'ADMIN' AND u.estado AND u.id_usuario <> $1`,
+                    [idUsuario]
+                );
+                if (admins[0].n === 0) {
+                    await cliente.query('ROLLBACK');
+                    return { ultimoAdmin: true };
+                }
+            }
+        }
+
+        const asignaciones = columnas.map((col, i) => `${col} = $${i + 2}`);
+        await cliente.query(
+            `UPDATE usuarios SET ${asignaciones.join(', ')} WHERE id_usuario = $1`,
+            [idUsuario, ...columnas.map((col) => campos[col])]
+        );
+        const { rows } = await cliente.query(
+            `SELECT ${COLUMNAS_PUBLICAS} FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol WHERE u.id_usuario = $1`,
+            [idUsuario]
+        );
+        await cliente.query('COMMIT');
+        return { usuario: rows[0] };
+    } catch (error) {
+        await cliente.query('ROLLBACK').catch(() => {});
+        throw error;
+    } finally {
+        cliente.release();
+    }
+}
+
 module.exports = {
     buscarPorCorreoOUsuario,
     existeRol,
     crearUsuario,
     listarUsuarios,
     obtenerUsuarioPorId,
+    buscarDuplicadoDeOtro,
+    actualizarUsuario,
 };
