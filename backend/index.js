@@ -2,24 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const JWT = require('./src/config/jwt'); // clave y expiración compartidas con el middleware
 const pool = require('./db');
-const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
+const usuariosRoutes = require('./routes/usuariosRoutes');
 const ventasRoutes = require('./routes/ventasRoutes');
 const errorHandler = require('./middleware/errorHandler');
-// DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
-// está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
-// backend/limpiarReservas.js (no en cron/) y usa tablas (reservas_stock,
-// detalles_reserva) y la columna productos.stock que no existen en el esquema.
-// Volver a activar estas líneas cuando la función de reservas esté lista.
-// const reservasRoutes = require('./routes/reservasRoutes');
-// const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
+const reservasRoutes = require('./routes/reservasRoutes');
+const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
 
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
-const { sanitizarXss } = require('./middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
-const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
-const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
+const xss = require('xss-clean');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -36,13 +28,12 @@ app.use(cors());
 app.use(express.json());
 
 // 2. Sanitización contra XSS (Cross-Site Scripting)
-app.use(sanitizarXss);
+app.use(xss());
 
 // 3. Rate Limiting: Limitar a 100 peticiones por minuto por IP
 const limiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1 minuto
-    // 100 por defecto; RATE_LIMIT_MAX permite subirlo en las pruebas de integración
-    max: Number(process.env.RATE_LIMIT_MAX) || 100, // Límite máximo de peticiones
+    max: 100, // Límite máximo de peticiones
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -63,9 +54,7 @@ app.use('/api', limiter);
 // =====================================================================
 app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
-// app.use('/api/reservations', reservasRoutes); // DESACTIVADO, ver arriba
-app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
-app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
+app.use('/api/reservations', reservasRoutes);
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
@@ -350,69 +339,61 @@ app.put('/api/products/:id', async (req, res) => {
 // =====================================================================
 app.post('/api/auth/login', async (req, res) => {
     try {
-        // El frontend envía "email"; se acepta también "correo" (nombre de la columna)
-        const correo = String(req.body?.email ?? req.body?.correo ?? '').trim().toLowerCase();
-        const { password } = req.body || {};
+        const { email, password } = req.body;
 
-        if (!correo || !password) {
+        if (!email || !password) {
             return res.status(400).json({
                 error: "Bad Request",
                 message: "Por favor provea un email y una contraseña."
             });
         }
 
-        const userQuery = `
-            SELECT u.id_usuario, u.correo, u.nombre_completo, u.password_hash, u.estado,
-                   u.id_rol, r.codigo AS rol
-            FROM usuarios u
-            JOIN roles r ON r.id_rol = u.id_rol
-            WHERE u.correo = $1`;
-        const { rows } = await pool.query(userQuery, [correo]);
-
-        // CU-01 E-03: el mismo mensaje si falla el correo o la contraseña
-        const credencialesInvalidas = () => res.status(401).json({
-            error: "Unauthorized",
-            message: "Correo o contraseña incorrectos."
-        });
+        const userQuery = 'SELECT id_usuario, email, password_hash, rol, estado FROM usuarios WHERE email = $1';
+        const { rows } = await pool.query(userQuery, [email]);
 
         if (rows.length === 0) {
-            return credencialesInvalidas();
+            return res.status(401).json({
+                error: "Unauthorized",
+                message: "Credenciales inválidas. Correo electrónico no encontrado."
+            });
         }
 
         const usuario = rows[0];
 
-        const isPasswordValid = await bcrypt.compare(password, usuario.password_hash);
-
-        if (!isPasswordValid) {
-            return credencialesInvalidas();
-        }
-
-        // CU-01 E-04: credenciales correctas pero cuenta inactiva
         if (usuario.estado === false) {
             return res.status(403).json({
                 error: "Forbidden",
-                message: "Su cuenta se encuentra inactiva. Comuníquese con el Administrador."
+                message: "La cuenta de usuario se encuentra inactiva."
+            });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, usuario.password_hash);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                error: "Unauthorized",
+                message: "Credenciales inválidas. Contraseña incorrecta."
             });
         }
 
         const tokenPayload = {
-            id_usuario: usuario.id_usuario,
-            id_rol: usuario.id_rol,
-            correo: usuario.correo,
+            id: usuario.id_usuario,
+            email: usuario.email,
             rol: usuario.rol
         };
 
-        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION });
-
-        await pool.query('UPDATE usuarios SET ultimo_acceso = now() WHERE id_usuario = $1', [usuario.id_usuario]);
+        const token = jwt.sign(
+            tokenPayload,
+            process.env.JWT_SECRET,
+            { expiresIn: '8h' }
+        );
 
         res.status(200).json({
             message: "Autenticación exitosa",
             token: token,
             user: {
                 id: usuario.id_usuario,
-                email: usuario.correo,
-                nombre_completo: usuario.nombre_completo,
+                email: usuario.email,
                 rol: usuario.rol
             }
         });
@@ -473,9 +454,7 @@ app.post('/api/auth/logout', async (req, res) => {
 });
 
 // 1. Capturador para rutas inexistentes (Error 404)
-// (Camilo, 2026-10-20) — Sin '*': en Express 5 app.use('*', ...) tumba la API
-// al arrancar ("Missing parameter name"). Sin ruta, app.use ya atrapa todo.
-app.use((req, res, next) => {
+app.use('*', (req, res, next) => {
     const error = new Error(`La ruta solicitada no existe: ${req.originalUrl}`);
     error.statusCode = 404;
     next(error); // Pasa el error al middleware global
@@ -483,8 +462,8 @@ app.use((req, res, next) => {
 
 // 2. Middleware Global de Manejo de Errores (DEBE SER EL ÚLTIMO app.use)
 app.use(errorHandler);
-// Iniciar procesos en segundo plano
-// iniciarLimpiezaDeReservas(); // DESACTIVADO, ver arriba
+
+iniciarLimpiezaDeReservas();
 
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
