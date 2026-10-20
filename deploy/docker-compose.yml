@@ -41,6 +41,9 @@ services:
     container_name: simo_api
     restart: unless-stopped
     environment:
+      # Base oficial en Neon con el rol simo_app (cadena del pooler). Si se
+      # deja vacía, la API usa la base local del servicio db (DB_*).
+      DATABASE_URL: ${DATABASE_URL:-}
       DB_HOST: db
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-simo_retail}
