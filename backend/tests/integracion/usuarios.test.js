@@ -11,6 +11,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const bcrypt = require('bcrypt');
 const pool = require('../../src/config/db');
+const { iniciarSesion } = require('./sesion');
 
 const PORT = process.env.TEST_PORT || 3999;
 const BASE = `http://localhost:${PORT}/api/users`;
@@ -19,9 +20,11 @@ let servidor;
 const casos = [];
 const caso = (nombre, fn) => casos.push([nombre, fn]);
 
+let token; // sesión del Administrador (seed)
+
 async function api(ruta = '', opciones = {}) {
     const res = await fetch(`${BASE}${ruta}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         ...opciones,
     });
     return { status: res.status, body: await res.json() };
@@ -47,6 +50,7 @@ async function iniciarServidor() {
         servidor.stdout.on('data', (d) => d.toString().includes('corriendo') && resolve());
         servidor.on('exit', (code) => reject(new Error(`El servidor terminó con código ${code}`)));
     });
+    token = await iniciarSesion(PORT, 'admin@simo.local');
 }
 
 async function detenerServidor() {

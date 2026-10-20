@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const JWT = require('./src/config/jwt'); // clave y expiración compartidas con el middleware
 const pool = require('./db');
 const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
 const ventasRoutes = require('./routes/ventasRoutes');
@@ -337,61 +338,69 @@ app.put('/api/products/:id', async (req, res) => {
 // =====================================================================
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        // El frontend envía "email"; se acepta también "correo" (nombre de la columna)
+        const correo = String(req.body?.email ?? req.body?.correo ?? '').trim().toLowerCase();
+        const { password } = req.body || {};
 
-        if (!email || !password) {
+        if (!correo || !password) {
             return res.status(400).json({
                 error: "Bad Request",
                 message: "Por favor provea un email y una contraseña."
             });
         }
 
-        const userQuery = 'SELECT id_usuario, email, password_hash, rol, estado FROM usuarios WHERE email = $1';
-        const { rows } = await pool.query(userQuery, [email]);
+        const userQuery = `
+            SELECT u.id_usuario, u.correo, u.nombre_completo, u.password_hash, u.estado,
+                   u.id_rol, r.codigo AS rol
+            FROM usuarios u
+            JOIN roles r ON r.id_rol = u.id_rol
+            WHERE u.correo = $1`;
+        const { rows } = await pool.query(userQuery, [correo]);
+
+        // CU-01 E-03: el mismo mensaje si falla el correo o la contraseña
+        const credencialesInvalidas = () => res.status(401).json({
+            error: "Unauthorized",
+            message: "Correo o contraseña incorrectos."
+        });
 
         if (rows.length === 0) {
-            return res.status(401).json({
-                error: "Unauthorized",
-                message: "Credenciales inválidas. Correo electrónico no encontrado."
-            });
+            return credencialesInvalidas();
         }
 
         const usuario = rows[0];
 
-        if (usuario.estado === false) {
-            return res.status(403).json({
-                error: "Forbidden",
-                message: "La cuenta de usuario se encuentra inactiva."
-            });
-        }
-
         const isPasswordValid = await bcrypt.compare(password, usuario.password_hash);
 
         if (!isPasswordValid) {
-            return res.status(401).json({
-                error: "Unauthorized",
-                message: "Credenciales inválidas. Contraseña incorrecta."
+            return credencialesInvalidas();
+        }
+
+        // CU-01 E-04: credenciales correctas pero cuenta inactiva
+        if (usuario.estado === false) {
+            return res.status(403).json({
+                error: "Forbidden",
+                message: "Su cuenta se encuentra inactiva. Comuníquese con el Administrador."
             });
         }
 
         const tokenPayload = {
-            id: usuario.id_usuario,
-            email: usuario.email,
+            id_usuario: usuario.id_usuario,
+            id_rol: usuario.id_rol,
+            correo: usuario.correo,
             rol: usuario.rol
         };
 
-        const token = jwt.sign(
-            tokenPayload,
-            process.env.JWT_SECRET,
-            { expiresIn: '8h' }
-        );
+        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION });
+
+        await pool.query('UPDATE usuarios SET ultimo_acceso = now() WHERE id_usuario = $1', [usuario.id_usuario]);
 
         res.status(200).json({
             message: "Autenticación exitosa",
             token: token,
             user: {
                 id: usuario.id_usuario,
-                email: usuario.email,
+                email: usuario.correo,
+                nombre_completo: usuario.nombre_completo,
                 rol: usuario.rol
             }
         });

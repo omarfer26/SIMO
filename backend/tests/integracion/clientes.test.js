@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const pool = require('../../src/config/db');
+const { iniciarSesion } = require('./sesion');
 
 const PORT = process.env.TEST_PORT_CLIENTES || 3997;
 const BASE = `http://localhost:${PORT}/api/customers`;
@@ -23,8 +24,13 @@ const ref = {};
 const casos = [];
 const caso = (nombre, fn) => casos.push([nombre, fn]);
 
+let token; // sesión del Vendedor (seed), actor principal de CU-09
+
 async function api(ruta = '', opciones = {}) {
-    const res = await fetch(`${BASE}${ruta}`, { headers: { 'Content-Type': 'application/json' }, ...opciones });
+    const res = await fetch(`${BASE}${ruta}`, {
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        ...opciones,
+    });
     return { status: res.status, body: await res.json() };
 }
 const crear = (cuerpo) => api('', { method: 'POST', body: JSON.stringify(cuerpo) });
@@ -41,6 +47,7 @@ async function preparar() {
         servidor.stdout.on('data', (d) => d.toString().includes('corriendo') && resolve());
         servidor.on('exit', (code) => reject(new Error(`El servidor terminó con código ${code}`)));
     });
+    token = await iniciarSesion(PORT, 'vendedor@simo.local');
 }
 
 async function limpiar() {

@@ -2,12 +2,11 @@
 // Módulo de inventario. Montado en /api/inventory desde index.js.
 const express = require('express');
 const { postIngresoBodega } = require('../controllers/inventario.controller');
-// Pendiente de SCRUM-16 (login JWT) y SCRUM-18 (middleware RBAC):
-// const { requireAuth, requireRole } = require('../middlewares/auth');
+const { verificarToken, verificarRol } = require('../../middleware/authMiddleware'); // SCRUM-16 / SCRUM-18
 
 const router = express.Router();
 
 // HU-05: ingreso de mercancía a Bodega (Encargado de Inventario)
-router.post('/entries', /* requireAuth, requireRole('INVENTARIO', 'ADMIN'), */ postIngresoBodega);
+router.post('/entries', verificarToken, verificarRol('INVENTARIO', 'ADMIN'), postIngresoBodega);
 
 module.exports = router;

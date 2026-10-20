@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const pool = require('../../src/config/db');
+const { iniciarSesion } = require('./sesion');
 
 const PORT = process.env.TEST_PORT_INVENTARIO || 3998;
 const URL = `http://localhost:${PORT}/api/inventory/entries`;
@@ -22,10 +23,12 @@ const ref = {}; // ids de los datos de prueba
 const casos = [];
 const caso = (nombre, fn) => casos.push([nombre, fn]);
 
-async function ingresar(cuerpo) {
+let token; // sesión del Encargado de Inventario (seed)
+
+async function ingresar(cuerpo, tokenSesion = token) {
     const res = await fetch(URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(tokenSesion ? { Authorization: `Bearer ${tokenSesion}` } : {}) },
         body: JSON.stringify(cuerpo),
     });
     return { status: res.status, body: await res.json() };
@@ -66,6 +69,7 @@ async function preparar() {
         servidor.stdout.on('data', (d) => d.toString().includes('corriendo') && resolve());
         servidor.on('exit', (code) => reject(new Error(`El servidor terminó con código ${code}`)));
     });
+    token = await iniciarSesion(PORT, 'inventario@simo.local');
 }
 
 async function limpiar() {
@@ -155,12 +159,20 @@ caso('Responde 409 si el producto está inactivo', async () => {
     assert.match(body.message, /inactivo/);
 });
 
-caso('Exige producto, usuario responsable válido y proveedor existente', async () => {
-    assert.equal((await ingresar({ cantidad: 1, id_usuario: ref.usuario })).status, 400);
-    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1 })).status, 400);
-    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1, id_usuario: 99999999 })).status, 400);
-    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1, id_usuario: ref.usuario, id_proveedor: 99999999 })).status, 400);
-    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1, id_usuario: ref.usuario, costo_unitario: -5 })).status, 400);
+caso('Exige producto, proveedor existente y costo válido (400)', async () => {
+    assert.equal((await ingresar({ cantidad: 1 })).status, 400);
+    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1, id_proveedor: 99999999 })).status, 400);
+    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1, costo_unitario: -5 })).status, 400);
+});
+
+caso('Exige sesión y rol INVENTARIO o ADMIN; el responsable sale del token (CU-05)', async () => {
+    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1 }, null)).status, 401);
+    const vendedor = await iniciarSesion(PORT, 'vendedor@simo.local');
+    assert.equal((await ingresar({ id_producto: ref.unidad, cantidad: 1 }, vendedor)).status, 403);
+    // id_usuario en el cuerpo se ignora: el responsable es el usuario de la sesión
+    const { status, body } = await ingresar({ id_producto: ref.kilo, cantidad: 1, id_usuario: 99999999 });
+    assert.equal(status, 201);
+    assert.equal(body.movimiento.id_usuario, ref.usuario);
 });
 
 caso('Los ingresos rechazados no modifican el stock ni el Kardex', async () => {

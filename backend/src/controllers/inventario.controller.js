@@ -44,11 +44,10 @@ async function postIngresoBodega(req, res) {
             id_producto, sku, cantidad, costo_unitario, id_proveedor, documento_referencia, observacion,
         } = req.body || {};
 
-        // El responsable saldrá del token JWT (SCRUM-16/18). Mientras no exista
-        // el login, se recibe en el cuerpo de la petición.
-        const idUsuario = req.user?.id_usuario ?? req.body?.id_usuario;
+        // El responsable es el usuario de la sesión (token JWT), nunca el cuerpo de la petición
+        const idUsuario = req.user?.id_usuario;
         if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
-            return badRequest(res, 'Debe indicar el usuario responsable del ingreso (id_usuario).');
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
         }
 
         if (id_producto === undefined && (typeof sku !== 'string' || !sku.trim())) {
