@@ -1,0 +1,80 @@
+[
+  {
+    "id": 1,
+    "codigo": "ELEC-001",
+    "nombre": "Audífonos Bluetooth X200",
+    "descripcion": "Audífonos inalámbricos con estuche de carga",
+    "categoria": "Electrónica",
+    "unidadMedida": "Unidad",
+    "precioCompra": 58400,
+    "precioVenta": 89900,
+    "stockActual": 12,
+    "stockMinimo": 5,
+    "estado": "Activo"
+  },
+  {
+    "id": 2,
+    "codigo": "ELEC-002",
+    "nombre": "Cargador USB-C 20W",
+    "descripcion": "Cargador rápido para celular",
+    "categoria": "Electrónica",
+    "unidadMedida": "Unidad",
+    "precioCompra": 22800,
+    "precioVenta": 35000,
+    "stockActual": 0,
+    "stockMinimo": 10,
+    "estado": "Activo"
+  },
+  {
+    "id": 3,
+    "codigo": "ELEC-003",
+    "nombre": "Cable HDMI 2 metros",
+    "descripcion": "Cable HDMI de alta velocidad",
+    "categoria": "Electrónica",
+    "unidadMedida": "Unidad",
+    "precioCompra": 11700,
+    "precioVenta": 18000,
+    "stockActual": 40,
+    "stockMinimo": 15,
+    "estado": "Inactivo"
+  },
+  {
+    "id": 4,
+    "codigo": "ROPA-001",
+    "nombre": "Camiseta algodón unisex",
+    "descripcion": "Camiseta básica manga corta, varias tallas",
+    "categoria": "Ropa",
+    "unidadMedida": "Unidad",
+    "precioCompra": 16200,
+    "precioVenta": 25000,
+    "stockActual": 30,
+    "stockMinimo": 10,
+    "estado": "Activo"
+  },
+  {
+    "id": 5,
+    "codigo": "ROPA-002",
+    "nombre": "Gorra deportiva",
+    "descripcion": "Gorra ajustable con visera curva",
+    "categoria": "Ropa",
+    "unidadMedida": "Unidad",
+    "precioCompra": 13000,
+    "precioVenta": 20000,
+    "stockActual": 0,
+    "stockMinimo": 8,
+    "estado": "Activo"
+  },
+  {
+    "id": 6,
+    "codigo": "FERR-001",
+    "nombre": "Martillo de uña 16oz",
+    "descripcion": "Mango de fibra de vidrio",
+    "categoria": "Ferretería",
+    "unidadMedida": "Unidad",
+    "precioCompra": 20800,
+    "precioVenta": 32000,
+    "stockActual": 7,
+    "stockMinimo": 3,
+    "estado": "Activo"
+  }
+]

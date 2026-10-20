@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
+    "test:integracion": "node -r dotenv/config --test \"tests/integracion/*.test.js\"",
     "start": "node index.js",
     "dev": "nodemon -r dotenv/config index.js"
   },
@@ -27,5 +28,11 @@
     "jest": "^30.5.2",
     "nodemon": "^3.1.14",
     "supertest": "^7.3.1"
+  },
+  "jest": {
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/integracion/"
+    ]
   }
 }
