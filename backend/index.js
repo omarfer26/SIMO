@@ -102,8 +102,8 @@ app.post('/api/products', async (req, res) => {
 
         const insertQuery = `
       INSERT INTO productos 
-      (id_categoria, codigo_barras, nombre, descripcion, precio_compra, precio_venta, stock_minimo)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      (id_categoria, id_unidad, sku, nombre, descripcion, precio_compra, precio_venta, stock_minimo_bodega, stock_minimo_almacen)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *;
     `;
 
@@ -115,7 +115,8 @@ app.post('/api/products', async (req, res) => {
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo_bodega || 5
+            stock_minimo_bodega || 0,
+            stock_minimo_almacen || 0
         ];
 
         const result = await pool.query(insertQuery, values);
@@ -173,7 +174,7 @@ app.get('/api/products', async (req, res) => {
         let queryIndex = 1;
 
         if (search.trim() !== '') {
-            baseWhere += ` AND (nombre ILIKE $${queryIndex} OR codigo_barras = $${queryIndex + 1})`;
+            baseWhere += ` AND (nombre ILIKE $${queryIndex} OR sku = $${queryIndex + 1})`;
             values.push(`%${search.trim()}%`);
             values.push(search.trim());
             queryIndex += 2;
@@ -188,13 +189,15 @@ app.get('/api/products', async (req, res) => {
             SELECT 
                 id_producto, 
                 id_categoria, 
-                codigo_barras, 
+                id_unidad,
+                sku, 
                 nombre, 
                 descripcion, 
                 precio_compra, 
                 precio_venta, 
-                stock_actual, 
-                stock_minimo,
+                stock_total, 
+                stock_minimo_bodega,
+                stock_minimo_almacen,
                 estado 
             FROM productos 
             ${baseWhere} 
@@ -254,12 +257,14 @@ app.put('/api/products/:id', async (req, res) => {
 
         const {
             id_categoria,
-            codigo_barras,
+            id_unidad,
+            sku,
             nombre,
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo,
+            stock_minimo_bodega,
+            stock_minimo_almacen,
             estado
         } = req.body;
 
@@ -277,26 +282,29 @@ app.put('/api/products/:id', async (req, res) => {
             UPDATE productos 
             SET 
                 id_categoria = COALESCE($1, id_categoria),
-                codigo_barras = COALESCE($2, codigo_barras),
-                nombre = COALESCE($3, nombre),
-                descripcion = COALESCE($4, descripcion),
-                precio_compra = COALESCE($5, precio_compra),
-                precio_venta = COALESCE($6, precio_venta),
-                stock_minimo = COALESCE($7, stock_minimo),
-                estado = COALESCE($8, estado),
-                fecha_actualizacion = CURRENT_TIMESTAMP
-            WHERE id_producto = $9
+                id_unidad = COALESCE($2, id_unidad),
+                sku = COALESCE($3, sku),
+                nombre = COALESCE($4, nombre),
+                descripcion = COALESCE($5, descripcion),
+                precio_compra = COALESCE($6, precio_compra),
+                precio_venta = COALESCE($7, precio_venta),
+                stock_minimo_bodega = COALESCE($8, stock_minimo_bodega),
+                stock_minimo_almacen = COALESCE($9, stock_minimo_almacen),
+                estado = COALESCE($10, estado)
+            WHERE id_producto = $11
             RETURNING *;
         `;
 
         const values = [
             id_categoria !== undefined ? id_categoria : null,
-            codigo_barras !== undefined ? codigo_barras : null,
+            id_unidad !== undefined ? id_unidad : null,
+            sku !== undefined ? sku : null,
             nombre !== undefined ? nombre : null,
             descripcion !== undefined ? descripcion : null,
             precio_compra !== undefined ? precio_compra : null,
             precio_venta !== undefined ? precio_venta : null,
-            stock_minimo !== undefined ? stock_minimo : null,
+            stock_minimo_bodega !== undefined ? stock_minimo_bodega : null,
+            stock_minimo_almacen !== undefined ? stock_minimo_almacen : null,
             estado !== undefined ? estado : null,
             id
         ];
@@ -315,7 +323,7 @@ app.put('/api/products/:id', async (req, res) => {
         if (error.code === '23505') {
             return res.status(409).json({
                 error: "Conflict",
-                message: "El código de barras ingresado ya pertenece a otro producto."
+                message: "El SKU ingresado ya pertenece a otro producto."
             });
         }
 
