@@ -23,7 +23,7 @@ El servidor es la Mac del equipo. Todo corre en contenedores y el acceso desde i
 | `db` | PostgreSQL 18. La primera vez ejecuta las migraciones de `backend/db` y crea el rol `simo_app` |
 | `api` | Backend Express. Se conecta como `simo_app` (sin permisos para alterar Kardex ni auditoría) |
 | `frontend` | Vista web (Next.js) compilada desde `simoapp/` con `deploy/frontend/Dockerfile`, sin cambios en su código |
-| `backup` | `pg_dump` diario a `deploy/backups/`, conserva 14 días (RNF-05) |
+| `backup` | `pg_dump` diario de la base oficial en Neon y de la base local a `deploy/backups/`, verificado y con 14 días de retención (RNF-05, SCRUM-134) |
 | `tunnel` | Conector de Cloudflare; publica los servicios según lo configurado en el panel |
 
 ## 1. Requisitos en la Mac
@@ -98,13 +98,31 @@ Actualizar la API o el frontend después de un `git pull`:
 docker compose up -d --build api frontend
 ```
 
-Respaldo manual inmediato:
+### Respaldos diarios (SCRUM-134)
+
+El servicio `backup` respalda todos los días a las `BACKUP_HOUR` (03:00, hora de Colombia):
+
+| Base | Se activa con | Archivo |
+|---|---|---|
+| Oficial en Neon | `BACKUP_DATABASE_URL` en `.env` (cadena **directa**, sin `-pooler`) | `backups/simo_neon_AAAAMMDD_HHMM.dump` |
+| Local del despliegue | variables `PG*` del servicio (ya configuradas) | `backups/simo_AAAAMMDD_HHMM.dump` |
+
+- Formato `custom` de `pg_dump` (comprimido, restaurable por partes).
+- Cada archivo se escribe como `.tmp` y solo se renombra si `pg_restore --list` lo lee
+  completo: nunca queda un respaldo dañado con nombre válido.
+- Si una base falla, se reintenta cada minuto durante esa hora sin repetir la otra.
+- Se borran los respaldos con más de `BACKUP_RETENTION_DAYS` días (14).
+- Conviene copiar alguno de vez en cuando fuera de la Mac (Drive, disco externo).
+
+Respaldo manual inmediato y registro del servicio:
 
 ```bash
-docker compose exec backup /respaldo.sh ahora
+docker compose exec backup sh /opt/backup/respaldo.sh ahora
 ```
 
-Los respaldos quedan en `deploy/backups/simo_AAAAMMDD_HHMM.dump`. Conviene copiar alguno de vez en cuando fuera de la Mac (Drive, disco externo).
+```bash
+docker compose logs --tail 20 backup
+```
 
 ### Aplicar migraciones nuevas
 
@@ -122,13 +140,40 @@ docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d simo_retail -v 
 
 ### Restaurar un respaldo
 
-Detener la API, restaurar y volver a levantarla:
+`backup/restaurar.sh` restaura en **una sola transacción** (si algo falla, la base queda
+como estaba) y al final verifica: cuenta filas de las tablas principales y audita el
+Kardex con `fn_validar_kardex()`.
+
+**Prueba de restauración** (recomendada una vez por sprint): restaurar el último respaldo
+de Neon en una base local vacía y revisar la verificación.
+
+```bash
+docker compose exec db createdb -U postgres simo_restaurada
+```
+
+```bash
+docker compose exec backup sh -c 'sh /opt/backup/restaurar.sh "$(ls -t /backups/simo_neon_*.dump | head -1)" "postgres://$PGUSER:$PGPASSWORD@db:5432/simo_restaurada"'
+```
+
+**Recuperar la base local** del despliegue (reemplaza su contenido):
 
 ```bash
 docker compose stop api
-docker compose exec -T db pg_restore --clean --if-exists --no-owner -U postgres -d simo_retail < backups/simo_AAAAMMDD_HHMM.dump
+```
+
+```bash
+docker compose exec -e SIMO_REEMPLAZAR=si backup sh -c 'sh /opt/backup/restaurar.sh /backups/simo_AAAAMMDD_HHMM.dump "postgres://$PGUSER:$PGPASSWORD@db:5432/$PGDATABASE"'
+```
+
+```bash
 docker compose start api
 ```
+
+**Recuperar la base de Neon**: lo más seguro es crear en el panel de Neon una rama
+nueva (Branches > Create branch), restaurar allí con su cadena de conexión y, una vez
+verificada, apuntar la API a esa rama. Restaurar directamente sobre la rama principal
+exige `SIMO_REEMPLAZAR=si` y `SIMO_CONFIRMAR_NEON=si`. Neon además guarda su propio
+historial (restauración a un punto en el tiempo) según el plan del proyecto.
 
 ### Empezar de cero (borra TODOS los datos)
 

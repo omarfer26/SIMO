@@ -80,8 +80,12 @@ services:
     image: postgres:18-alpine
     container_name: simo_backup
     restart: unless-stopped
-    entrypoint: ["sh", "/respaldo.sh"]
+    # Se monta la carpeta (no el archivo): así el contenedor ve el script
+    # actualizado aunque git lo reescriba al cambiar de rama.
+    entrypoint: ["sh", "/opt/backup/respaldo.sh"]
     environment:
+      # Base oficial en Neon (SCRUM-134). Vacía: solo se respalda la base local.
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:-}
       PGHOST: db
       PGUSER: ${POSTGRES_USER:-postgres}
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -91,7 +95,7 @@ services:
       # Hora de Colombia (UTC-5, sin horario de verano) sin depender de tzdata
       TZ: "<-05>5"
     volumes:
-      - ./backup/respaldo.sh:/respaldo.sh:ro
+      - ./backup:/opt/backup:ro
       - ./backups:/backups
     depends_on:
       db:
