@@ -3,7 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('./db');
-const usuariosRoutes = require('./routes/usuariosRoutes');
+const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
 const ventasRoutes = require('./routes/ventasRoutes');
 
 // Módulos de seguridad (SCRUM-127)

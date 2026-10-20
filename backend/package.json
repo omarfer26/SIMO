@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
+    "test:integracion": "node -r dotenv/config --test \"tests/integracion/*.test.js\"",
     "start": "node index.js",
     "dev": "nodemon -r dotenv/config index.js"
   },
