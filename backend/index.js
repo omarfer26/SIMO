@@ -7,8 +7,13 @@ const pool = require('./db');
 const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
 const ventasRoutes = require('./routes/ventasRoutes');
 const errorHandler = require('./middleware/errorHandler');
-const reservasRoutes = require('./routes/reservasRoutes');
-const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
+// DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
+// está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
+// backend/limpiarReservas.js (no en cron/) y usa tablas (reservas_stock,
+// detalles_reserva) y la columna productos.stock que no existen en el esquema.
+// Volver a activar estas líneas cuando la función de reservas esté lista.
+// const reservasRoutes = require('./routes/reservasRoutes');
+// const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
 
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
@@ -58,12 +63,9 @@ app.use('/api', limiter);
 // =====================================================================
 app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
-<<<<<<< HEAD
-app.use('/api/reservations', reservasRoutes);
-=======
+// app.use('/api/reservations', reservasRoutes); // DESACTIVADO, ver arriba
 app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
 app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
->>>>>>> 2803fb01a9d932843f9af80daca6383fe1e011db
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
@@ -471,7 +473,9 @@ app.post('/api/auth/logout', async (req, res) => {
 });
 
 // 1. Capturador para rutas inexistentes (Error 404)
-app.use('*', (req, res, next) => {
+// (Camilo, 2026-10-20) — Sin '*': en Express 5 app.use('*', ...) tumba la API
+// al arrancar ("Missing parameter name"). Sin ruta, app.use ya atrapa todo.
+app.use((req, res, next) => {
     const error = new Error(`La ruta solicitada no existe: ${req.originalUrl}`);
     error.statusCode = 404;
     next(error); // Pasa el error al middleware global
@@ -480,7 +484,7 @@ app.use('*', (req, res, next) => {
 // 2. Middleware Global de Manejo de Errores (DEBE SER EL ÚLTIMO app.use)
 app.use(errorHandler);
 // Iniciar procesos en segundo plano
-iniciarLimpiezaDeReservas();
+// iniciarLimpiezaDeReservas(); // DESACTIVADO, ver arriba
 
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
