@@ -44,6 +44,16 @@ const formatoMoneda = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
+export interface InfoLiquidacionVenta {
+  metodoPago: CodigoMetodoPago;
+  subtotal: number;
+  descuento: number;
+  impuestos: number;
+  total: number;
+  recibido: number;
+  cambio: number;
+}
+
 interface ConfirmarVentaProps {
   items: ItemCanasta[];
   /** SCRUM-123 (Camilo) — Cliente elegido en el POS; null = Consumidor final. */
@@ -51,7 +61,7 @@ interface ConfirmarVentaProps {
   /** Cajero / Vendedor en turno */
   cajero?: UsuarioListado | null;
   /** `cambio` va aparte porque no se guarda en el backend, solo se muestra. */
-  onConfirmada: (venta: VentaRegistrada, cambio: number) => void;
+  onConfirmada: (venta: VentaRegistrada, cambio: number, info?: InfoLiquidacionVenta) => void;
   onCancelar: () => void;
 }
 
@@ -116,7 +126,15 @@ export default function ConfirmarVenta({
         impuestos: liquidacion.impuestos,
         total: liquidacion.total,
       });
-      onConfirmada(venta, esEfectivo ? liquidacion.cambio : 0);
+      onConfirmada(venta, esEfectivo ? liquidacion.cambio : 0, {
+        metodoPago,
+        subtotal: liquidacion.subtotal,
+        descuento: liquidacion.descuento,
+        impuestos: liquidacion.impuestos,
+        total: liquidacion.total,
+        recibido: esEfectivo ? Number(recibidoTexto) || 0 : 0,
+        cambio: esEfectivo ? liquidacion.cambio : 0,
+      });
     } catch (error) {
       setErrorGeneral(mensajeErrorVenta(error));
       setEnviando(false);

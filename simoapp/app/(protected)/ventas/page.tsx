@@ -9,6 +9,7 @@ import { Modal } from "@/components/ui/Modal";
 import ConfirmarVenta from "@/components/ventas/ConfirmarVenta";
 import SeleccionarCliente from "@/components/ventas/SeleccionarCliente";
 import SelectorCajeroTurno from "@/components/ventas/SelectorCajeroTurno";
+import TicketTermico, { type DatosTicket } from "@/components/ventas/TicketTermico";
 import type { Cliente } from "@/lib/clientes/tipos";
 import { formatoDocumento } from "@/lib/clientes/validaciones";
 import type { ItemCanasta } from "@/lib/ventas/tipos";
@@ -80,6 +81,9 @@ export default function VentasPage() {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [eligiendoCliente, setEligiendoCliente] = useState(false);
   const [aperturasCliente, setAperturasCliente] = useState(0);
+
+  // Ticket / Comprobante Térmico de 80mm
+  const [ticketImprimir, setTicketImprimir] = useState<DatosTicket | null>(null);
 
   // Cajero / Vendedor en turno POS
   const [cajeroActual, setCajeroActual] = useState<UsuarioListado | null>(null);
@@ -557,7 +561,11 @@ export default function VentasPage() {
           cliente={cliente}
           cajero={cajeroActual}
           onCancelar={() => setConfirmando(false)}
-          onConfirmada={(venta, cambio) => {
+          onConfirmada={(venta, cambio, info) => {
+            const itemsVendidos = [...canasta];
+            const clienteVendido = cliente;
+            const cajeroVendido = cajeroActual;
+
             descontarStock(
               canasta.map((item) => ({ id: item.producto.id, cantidad: item.cantidad })),
             );
@@ -566,6 +574,22 @@ export default function VentasPage() {
             setCliente(null);
             setRecuperada(null);
             setBusqueda("");
+
+            // Preparar datos del comprobante térmico de 80mm
+            setTicketImprimir({
+              venta,
+              items: itemsVendidos,
+              cliente: clienteVendido,
+              cajero: cajeroVendido,
+              metodoPago: info?.metodoPago ?? "EFECTIVO",
+              subtotal: info?.subtotal ?? venta.total,
+              descuento: info?.descuento ?? 0,
+              impuestos: info?.impuestos ?? 0,
+              total: info?.total ?? venta.total,
+              recibido: info?.recibido ?? 0,
+              cambio: info?.cambio ?? cambio,
+            });
+
             mostrarAlerta(
               `Venta #${venta.idVenta} registrada por ${formatoMoneda.format(venta.total)}.` +
               (cambio > 0 ? ` Cambio: ${formatoMoneda.format(cambio)}.` : ""),
@@ -573,6 +597,21 @@ export default function VentasPage() {
             );
           }}
         />
+      </Modal>
+
+      {/* Modal de Comprobante Térmico (80mm) con vista previa e impresión directa */}
+      <Modal
+        isOpen={Boolean(ticketImprimir)}
+        onClose={() => setTicketImprimir(null)}
+        title="Comprobante de Venta (80mm)"
+        maxWidth="md"
+      >
+        {ticketImprimir && (
+          <TicketTermico
+            datos={ticketImprimir}
+            onCerrar={() => setTicketImprimir(null)}
+          />
+        )}
       </Modal>
 
       {/* SCRUM-123 (Camilo) — Modal de búsqueda rápida por Cédula/NIT. */}

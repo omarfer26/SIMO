@@ -117,3 +117,9 @@ export function validarEdicionUsuario(
 ): Errores<keyof DatosEdicionUsuario> {
   return soloConError(erroresDatosUsuario(datos));
 }
+
+export function validarRecuperarPassword(correo: string): Errores<"correo"> {
+  return soloConError({
+    correo: errorCorreo(correo),
+  });
+}
