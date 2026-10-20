@@ -16,13 +16,15 @@ db/
 │   ├── 008_ingreso_bodega.sql  función fn_registrar_ingreso_bodega (HU-05)
 │   ├── 009_clientes.sql        búsqueda por documento y documento inalterable (HU-09)
 │   ├── 010_sesiones.sql        tokens invalidados por cierre de sesión (SCRUM-17)
-│   └── 011_compras.sql         compras a proveedor y sp_confirmar_compra (SCRUM-45)
+│   ├── 011_compras.sql         compras a proveedor y sp_confirmar_compra (SCRUM-45)
+│   └── 012_saldo_kardex.sql    fn_kardex_producto y fn_validar_kardex (SCRUM-132)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 └── tests/
     ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
     ├── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
-    └── 003_compras.sql           17 pruebas de compras y sp_confirmar_compra (no deja datos)
+    ├── 003_compras.sql           17 pruebas de compras y sp_confirmar_compra (no deja datos)
+    └── 004_saldo_kardex.sql      12 pruebas del saldo y la valorización del Kardex (no deja datos)
 ```
 
 ## Cómo crear la base
@@ -112,3 +114,15 @@ erDiagram
 6. **Precio de compra.** No devolver `precio_compra` ni `costo_unitario` a usuarios con rol `VENDEDOR`.
 7. **Tipos.** `pg` devuelve `NUMERIC` como texto (`"12.500"`): convertir en la API si el frontend espera números.
 8. **Roles.** Usar `roles.codigo` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`) en el JWT y en `requireRole()`.
+
+## Kardex: consulta y auditoría (SCRUM-132)
+
+```sql
+-- Kardex de un producto (opcionalmente entre dos fechas), con saldos por ubicación
+-- y valorización por costo promedio ponderado
+SELECT * FROM fn_kardex_producto(1);
+SELECT * FROM fn_kardex_producto(1, '2026-10-01', '2026-10-31');
+
+-- Auditoría: ¿el saldo del Kardex coincide con el stock de cada producto?
+SELECT * FROM fn_validar_kardex() WHERE NOT consistente;
+```
