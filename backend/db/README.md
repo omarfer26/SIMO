@@ -17,11 +17,13 @@ db/
 │   ├── 009_clientes.sql        búsqueda por documento y documento inalterable (HU-09)
 │   ├── 010_sesiones.sql        tokens invalidados por cierre de sesión (SCRUM-17)
 │   ├── 011_compras.sql         compras a proveedor y sp_confirmar_compra (SCRUM-45)
-│   └── 012_saldo_kardex.sql    fn_kardex_producto y fn_validar_kardex (SCRUM-132)
+│   ├── 012_saldo_kardex.sql    fn_kardex_producto y fn_validar_kardex (SCRUM-132)
+│   └── 013_indices_ventas.sql  índices B-tree de cobertura para ventas (SCRUM-133)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
-│   └── poblar_masivo.sql     datos masivos coherentes para pruebas de carga (SCRUM-131)
+│   ├── poblar_masivo.sql         datos masivos coherentes para pruebas de carga (SCRUM-131)
+│   └── consultas_rendimiento.sql consultas de referencia con EXPLAIN ANALYZE (SCRUM-133)
 └── tests/
     ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
     ├── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
@@ -153,3 +155,25 @@ psql -d simo_retail -v productos=2000 -v clientes=5000 -v ventas=50000 -f db/car
 - Como el Kardex es inalterable, estos datos **no se pueden borrar**: el script se niega a
   correr dos veces en la misma base y a correr en la base compartida de Neon (`neondb`)
   salvo que se pase `-v forzar=si`. Úselo en una base local o en una rama de Neon.
+
+## Índices de ventas (SCRUM-133)
+
+Medido con `carga/consultas_rendimiento.sql` sobre 49.996 ventas y 149.953 líneas
+(PostgreSQL 18, mejor de 3 ejecuciones, `EXPLAIN ANALYZE`):
+
+| Consulta | Antes | Plan antes | Después | Plan después |
+|---|---|---|---|---|
+| Q1 Historial del último mes (todas las ventas) | 7,16 ms | Seq Scan ventas | 0,57 ms | Index Scan `idx_ventas_fecha` |
+| Q2 Total por día de la semana (dashboard) | 0,26 ms | Index Scan | 0,22 ms | **Index Only Scan** `idx_ventas_fecha_completadas` |
+| Q3 Productos más vendidos del mes | 8,73 ms | Seq Scan 150.000 líneas | ~4,5 ms | Index Only Scan `uq_detalles_ventas_producto` |
+| Q4 Historial de ventas de un producto | 0,24 ms | Bitmap Heap Scan | 0,25 ms | **Index Only Scan** `idx_detalles_ventas_producto` |
+| Q5 Unidades vendidas de un producto (trimestre) | 0,13 ms | Bitmap Heap Scan | 0,12 ms | **Index Only Scan** `idx_detalles_ventas_producto` |
+| Q6 Últimas 20 ventas | 5,09 ms | Seq Scan + Sort | 0,015 ms | Index Scan Backward `idx_ventas_fecha` |
+
+- Las consultas por fecha sin filtrar estado (Q1, Q6) eran las críticas: crecían con
+  el tamaño de la tabla; ahora leen solo las filas del rango.
+- Q4 y Q5 ya eran rápidas; el índice de cobertura evita además visitar la tabla.
+- La migración fija `random_page_cost = 1.1` (discos SSD) para la base; con el valor
+  por defecto (4) el planificador no usaba el índice en Q3.
+- Los índices se mantienen solos; tras cargas masivas conviene `VACUUM ANALYZE`
+  para que los Index Only Scan no tengan que revisar la tabla.
