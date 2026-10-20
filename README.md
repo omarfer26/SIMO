@@ -56,11 +56,12 @@ DB_USER=postgres
 DB_PASSWORD=123456
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=retail
+DB_NAME=simo_retail
 PORT=3000
+SIMO_SEED=true
 ```
 
-### 🚀 Guía de Inicio Rápido
+Al crear el contenedor por primera vez, PostgreSQL ejecuta automáticamente las migraciones de `backend/db/migrations` y los datos de prueba de `backend/db/seeds` (ver `backend/db/README.md`).
 
 **Requisitos Previos**: Tener Docker Desktop instalado y en ejecución.
 
@@ -112,7 +113,7 @@ docker-compose down -v
 Puedes conectarte desde cualquier cliente local con los siguientes datos:
 - **Host**: localhost
 - **Puerto**: 5432
-- **Base de Datos**: retail
+- **Base de Datos**: simo_retail
 - **Usuario**: postgres
 - **Contraseña**: 123456
 
@@ -127,11 +128,40 @@ Una vez levantados los contenedores, puedes probar el endpoint de creación de p
 ```json
 {
   "id_categoria": 1,
-  "codigo_barras": "7701234567890",
+  "id_unidad": 1,
+  "sku": "7701234567890",
   "nombre": "Teclado Mecánico RGB",
   "descripcion": "Teclado para juegos con switches red",
   "precio_compra": 45.00,
   "precio_venta": 75.00,
-  "stock_minimo": 5
+  "stock_minimo_bodega": 10,
+  "stock_minimo_almacen": 5
 }
+
+## 👤 Endpoints de Usuarios (SCRUM-22, SCRUM-23)
+
+> Pendiente de protección con JWT + rol `ADMIN` (SCRUM-16 / SCRUM-18).
+
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| POST | `/api/users` | Crea un usuario. Body: `id_rol`, `nombre_completo`, `correo`, `usuario`, `password` (mín. 8) |
+| GET | `/api/users` | Lista paginada. Query opcional: `page`, `limit` (1-100, por defecto 10), `estado` (`true`/`false`), `id_rol`, `rol` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`), `q` (busca en nombre, correo o usuario) |
+| GET | `/api/users/:id` | Detalle de un usuario |
+
+Ejemplo: `GET /api/users?rol=VENDEDOR&estado=true&page=1&limit=10`
+
+```json
+{
+  "data": [
+    { "id_usuario": 4, "nombre_completo": "Vendedor SIMO", "correo": "vendedor@simo.local", "usuario": "vendedor",
+      "estado": true, "id_rol": 4, "rol_codigo": "VENDEDOR", "rol_nombre": "Vendedor",
+      "bloqueado_hasta": null, "ultimo_acceso": null, "creado_en": "...", "actualizado_en": "..." }
+  ],
+  "pagination": { "page": 1, "limit": 10, "total": 1, "totalPages": 1 }
+}
+```
+
+Errores: `400` parámetros inválidos, `404` usuario inexistente, `409` correo o usuario duplicado. Formato: `{ "error": "Bad Request", "message": "..." }`. La contraseña nunca se devuelve.
+
+**Pruebas automáticas** (requieren la base creada con el seed): `npm test`
 ```
