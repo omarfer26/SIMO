@@ -2,11 +2,10 @@
 // "Buscar cliente" del POS llama a buscarClientes() y registrarCliente() sin
 // saber si detrás está la API real o el mock.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_CLIENTES_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// los endpoints de clientes están en la rama feature/SCRUM-98-gestion-clientes
-// (Ramón, 2026-10-15) y todavía no se han unido a back-end.
+// (Camilo, 2026-10-20) — AHORA SE USA LA API REAL POR DEFECTO: los endpoints
+// de clientes de Ramón ya están en back-end y main, así que los clientes se
+// guardan en la base de datos. Para volver al mock, en simoapp/.env.local
+// poner NEXT_PUBLIC_CLIENTES_MOCK=true y reiniciar `npm run dev`.
 //
 // CONTRATO (el que ya implementó Ramón, no uno propuesto):
 //   GET  /api/customers?q=<texto>&estado=true&limit=8
@@ -26,7 +25,7 @@ import apiClient from "@/lib/apiClient";
 import type { Cliente, DatosClienteNuevo, TipoDocumento } from "./tipos";
 import { normalizarDocumento } from "./validaciones";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_CLIENTES_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_CLIENTES_MOCK === "true";
 
 // Cuántas sugerencias se piden al buscar.
 const LIMITE_SUGERENCIAS = 8;
