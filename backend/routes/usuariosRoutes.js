@@ -2,10 +2,13 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const pool = require('../db');
 
+// 1. Importar los middlewares de autorización
+const { verificarToken, verificarRol } = require('../middleware/authMiddleware');
+
 const router = express.Router();
 
-// GET /api/users - Listar usuarios
-router.get('/', async (req, res) => {
+// GET /api/users - Listar usuarios (Accesible para ADMIN y GERENTE)
+router.get('/', verificarToken, verificarRol(1, 2), async (req, res) => {
     try {
         const query = 'SELECT id_usuario, correo, id_rol, estado FROM usuarios ORDER BY id_usuario DESC';
         const { rows } = await pool.query(query);
@@ -16,8 +19,8 @@ router.get('/', async (req, res) => {
     }
 });
 
-// POST /api/users - Crear usuario
-router.post('/', async (req, res) => {
+// POST /api/users - Crear usuario (Exclusivo para ADMIN)
+router.post('/', verificarToken, verificarRol(1), async (req, res) => {
     const { correo, password, id_rol } = req.body;
 
     if (!correo || !password || !id_rol) {

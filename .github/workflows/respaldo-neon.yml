@@ -1,0 +1,57 @@
+# SIMO - Respaldo diario de la base oficial en Neon (RNF-05, SCRUM-134)
+#
+# Corre en los servidores de GitHub, sin depender de ningún computador del
+# equipo. Genera un pg_dump, lo verifica, lo CIFRA (el repositorio puede ser
+# público) y lo guarda como artefacto de la ejecución durante 14 días.
+#
+# Secretos del repositorio (Settings > Secrets and variables > Actions):
+#   NEON_BACKUP_URL  cadena DIRECTA de Neon (sin "-pooler") del dueño de la base
+#   RESPALDO_CLAVE   frase para cifrar los respaldos (guardarla en lugar seguro)
+#
+# GitHub solo ejecuta los workflows programados desde la rama principal (main):
+# empieza a correr solo cuando este archivo llegue a main.
+# Restauración: deploy/README.md, sección "Respaldos en GitHub Actions".
+name: Respaldo diario Neon
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 03:00 hora de Colombia (UTC-5)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: postgres:18-alpine
+    steps:
+      - name: Respaldo, verificación y cifrado
+        env:
+          NEON_BACKUP_URL: ${{ secrets.NEON_BACKUP_URL }}
+          RESPALDO_CLAVE: ${{ secrets.RESPALDO_CLAVE }}
+        run: |
+          set -eu
+          if [ -z "$NEON_BACKUP_URL" ] || [ -z "$RESPALDO_CLAVE" ]; then
+            echo "Faltan los secretos NEON_BACKUP_URL y/o RESPALDO_CLAVE" >&2
+            exit 1
+          fi
+          apk add --no-cache openssl > /dev/null
+          nombre="simo_neon_$(TZ='<-05>5' date +%Y%m%d_%H%M)"
+          mkdir -p respaldo
+          pg_dump --format=custom --no-owner --no-privileges --file="$nombre.dump" "$NEON_BACKUP_URL"
+          pg_restore --list "$nombre.dump" > /dev/null
+          echo "Respaldo verificado: $(du -h "$nombre.dump" | cut -f1)"
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -pass env:RESPALDO_CLAVE -in "$nombre.dump" -out "respaldo/$nombre.dump.enc"
+          rm "$nombre.dump"
+          echo "NOMBRE=$nombre" >> "$GITHUB_ENV"
+
+      - name: Guardar respaldo cifrado
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NOMBRE }}
+          path: respaldo/
+          retention-days: 14
+          if-no-files-found: error
