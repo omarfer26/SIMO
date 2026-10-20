@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: simo-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # Se define manualmente en el dashboard de Render
+      - key: NODE_ENV
+        value: production
