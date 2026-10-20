@@ -44,7 +44,7 @@ interface ProductosContextValue {
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 
 // Fila de producto tal como sale de la tabla `productos`
 // (backend/db/migrations/003_catalogo.sql). Los NUMERIC de PostgreSQL llegan
