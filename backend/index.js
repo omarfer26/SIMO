@@ -1,20 +1,65 @@
-// index.js (Parte superior)
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcrypt'); // Requerido para el punto 1 y 2
-const jwt = require('jsonwebtoken'); // Requerido para el punto 1
-const pool = require('./db'); // Requerido para el punto 1 (ajusta la ruta según tu proyecto)
-const usuariosRoutes = require('./routes/usuariosRoutes'); // Requerido para el punto 1
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const JWT = require('./src/config/jwt'); // clave y expiración compartidas con el middleware
+const pool = require('./db');
+const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
+const ventasRoutes = require('./routes/ventasRoutes');
+
+// Módulos de seguridad (SCRUM-127)
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const { sanitizarXss } = require('./middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
+const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
+const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
 
 const app = express();
-// Cambiamos el puerto al 3001 para liberar el 3000 que usa Next.js
 const port = process.env.PORT || 3001;
 
-// Middlewares
-app.use(cors());
-app.use(express.json()); // Permite a Express leer el cuerpo (body) de las peticiones en formato JSON
+// =====================================================================
+// MIDDLEWARES DE SEGURIDAD Y CONFIGURACIÓN BASE
+// =====================================================================
 
-// Estado del servicio: lo usan Docker (healthcheck) y el monitoreo del despliegue
+// 1. Helmet: Protege la aplicación configurando cabeceras HTTP seguras
+app.use(helmet());
+
+// Middlewares base
+app.use(cors());
+app.use(express.json());
+
+// 2. Sanitización contra XSS (Cross-Site Scripting)
+app.use(sanitizarXss);
+
+// 3. Rate Limiting: Limitar a 100 peticiones por minuto por IP
+const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minuto
+    // 100 por defecto; RATE_LIMIT_MAX permite subirlo en las pruebas de integración
+    max: Number(process.env.RATE_LIMIT_MAX) || 100, // Límite máximo de peticiones
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: "Too Many Requests",
+        message: "Has superado el límite de peticiones permitidas. Por favor, intenta de nuevo en un minuto."
+    }
+});
+
+// Aplicar el limitador a todas las rutas de la API
+app.use('/api', limiter);
+
+// =====================================================================
+// ENRUTADORES
+// =====================================================================
+app.use('/api/sales', ventasRoutes);
+app.use('/api/users', usuariosRoutes);
+app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
+app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
+
+// =====================================================================
+// ENDPOINTS PRINCIPALES
+// =====================================================================
+
+// Estado del servicio (Healthcheck)
 app.get('/api/health', async (req, res) => {
     try {
         await pool.query('SELECT 1');
@@ -24,12 +69,8 @@ app.get('/api/health', async (req, res) => {
     }
 });
 
-// Módulo de usuarios (SCRUM-22, SCRUM-23)
-app.use('/api/users', usuariosRoutes);
-
 // =====================================================================
 // ENDPOINT 1: POST /api/products (Tarea SCRUM-33)
-// Guardar producto con validación de precio de venta > precio de compra
 // =====================================================================
 app.post('/api/products', async (req, res) => {
     try {
@@ -45,7 +86,6 @@ app.post('/api/products', async (req, res) => {
             stock_minimo_almacen
         } = req.body;
 
-        // Validación de Negocio
         if (parseFloat(precio_venta) <= parseFloat(precio_compra)) {
             return res.status(400).json({
                 error: "Bad Request",
@@ -53,7 +93,6 @@ app.post('/api/products', async (req, res) => {
             });
         }
 
-        // Validación extra para evitar errores comunes
         if (!id_categoria || !nombre || !precio_compra || !precio_venta) {
             return res.status(400).json({
                 error: "Bad Request",
@@ -65,7 +104,7 @@ app.post('/api/products', async (req, res) => {
       INSERT INTO productos 
       (id_categoria, codigo_barras, nombre, descripcion, precio_compra, precio_venta, stock_minimo)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *; -- Esto hace que PostgreSQL devuelva el registro recién insertado
+      RETURNING *;
     `;
 
         const values = [
@@ -76,7 +115,7 @@ app.post('/api/products', async (req, res) => {
             descripcion,
             precio_compra,
             precio_venta,
-            stock_minimo || 5 // Por defecto 5 si no lo envían, acorde a nuestra DB
+            stock_minimo_bodega || 5
         ];
 
         const result = await pool.query(insertQuery, values);
@@ -113,7 +152,6 @@ app.post('/api/products', async (req, res) => {
 
 // =====================================================================
 // ENDPOINT 2: GET /api/products (Tarea SCRUM-34)
-// Consulta paginada con filtrado SQL optimizado por código y nombre
 // =====================================================================
 app.get('/api/products', async (req, res) => {
     try {
@@ -192,13 +230,11 @@ app.get('/api/products', async (req, res) => {
 
 // =====================================================================
 // ENDPOINT 3: PUT /api/products/:id (Tarea SCRUM-35)
-// Actualización técnica de atributos de un producto existente
 // =====================================================================
 app.put('/api/products/:id', async (req, res) => {
     try {
         const { id } = req.params;
 
-        // 1. Validar que el ID enviado en la URL sea un número válido
         if (isNaN(id)) {
             return res.status(400).json({
                 error: "Bad Request",
@@ -206,7 +242,6 @@ app.put('/api/products/:id', async (req, res) => {
             });
         }
 
-        // 2. Comprobar si el producto existe previamente en la BD
         const productCheck = await pool.query('SELECT * FROM productos WHERE id_producto = $1', [id]);
         if (productCheck.rows.length === 0) {
             return res.status(404).json({
@@ -217,7 +252,6 @@ app.put('/api/products/:id', async (req, res) => {
 
         const productoActual = productCheck.rows[0];
 
-        // 3. Extraer atributos a actualizar desde el body
         const {
             id_categoria,
             codigo_barras,
@@ -229,7 +263,6 @@ app.put('/api/products/:id', async (req, res) => {
             estado
         } = req.body;
 
-        // 4. Evaluar los precios finales (nuevos o existentes) para la regla de negocio
         const finalPrecioCompra = precio_compra !== undefined ? parseFloat(precio_compra) : parseFloat(productoActual.precio_compra);
         const finalPrecioVenta = precio_venta !== undefined ? parseFloat(precio_venta) : parseFloat(productoActual.precio_venta);
 
@@ -240,8 +273,6 @@ app.put('/api/products/:id', async (req, res) => {
             });
         }
 
-        // 5. Ejecutar la consulta SQL UPDATE
-        // COALESCE ($1, campo) mantendrá el valor actual si la variable se envía como NULL
         const updateQuery = `
             UPDATE productos 
             SET 
@@ -273,7 +304,6 @@ app.put('/api/products/:id', async (req, res) => {
         const result = await pool.query(updateQuery, values);
         const productoActualizado = result.rows[0];
 
-        // 6. Responder con éxito y el objeto actualizado
         res.status(200).json({
             message: "Producto actualizado exitosamente",
             producto: productoActualizado
@@ -282,7 +312,6 @@ app.put('/api/products/:id', async (req, res) => {
     } catch (error) {
         console.error('Error al actualizar producto:', error);
 
-        // Captura de código de barras duplicado
         if (error.code === '23505') {
             return res.status(409).json({
                 error: "Conflict",
@@ -290,7 +319,6 @@ app.put('/api/products/:id', async (req, res) => {
             });
         }
 
-        // Captura de categoría inexistente
         if (error.code === '23503') {
             return res.status(400).json({
                 error: "Bad Request",
@@ -307,80 +335,72 @@ app.put('/api/products/:id', async (req, res) => {
 
 // =====================================================================
 // ENDPOINT 4: POST /api/auth/login (Tarea SCRUM-16)
-// Verificación de credenciales con BCrypt y generación de JWT
 // =====================================================================
 app.post('/api/auth/login', async (req, res) => {
     try {
-        // 1. Extraer credenciales del cuerpo de la petición
-        const { email, password } = req.body;
+        // El frontend envía "email"; se acepta también "correo" (nombre de la columna)
+        const correo = String(req.body?.email ?? req.body?.correo ?? '').trim().toLowerCase();
+        const { password } = req.body || {};
 
-        // Validar que se envíen los datos requeridos
-        if (!email || !password) {
+        if (!correo || !password) {
             return res.status(400).json({
                 error: "Bad Request",
                 message: "Por favor provea un email y una contraseña."
             });
         }
 
-        // 2. Buscar al usuario en la base de datos por su email
-        // (Asumimos que tienes una tabla 'usuarios' con columnas 'email' y 'password_hash')
-        const userQuery = 'SELECT id_usuario, email, password_hash, rol, estado FROM usuarios WHERE email = $1';
-        const { rows } = await pool.query(userQuery, [email]);
+        const userQuery = `
+            SELECT u.id_usuario, u.correo, u.nombre_completo, u.password_hash, u.estado,
+                   u.id_rol, r.codigo AS rol
+            FROM usuarios u
+            JOIN roles r ON r.id_rol = u.id_rol
+            WHERE u.correo = $1`;
+        const { rows } = await pool.query(userQuery, [correo]);
 
-        // Si el usuario no existe, devolvemos 401 Unauthorized
+        // CU-01 E-03: el mismo mensaje si falla el correo o la contraseña
+        const credencialesInvalidas = () => res.status(401).json({
+            error: "Unauthorized",
+            message: "Correo o contraseña incorrectos."
+        });
+
         if (rows.length === 0) {
-            return res.status(401).json({
-                error: "Unauthorized",
-                message: "Credenciales inválidas. Correo electrónico no encontrado."
-            });
+            return credencialesInvalidas();
         }
 
         const usuario = rows[0];
 
-        // Validar que el usuario no esté inactivo o suspendido
-        if (usuario.estado === false) {
-            return res.status(403).json({
-                error: "Forbidden",
-                message: "La cuenta de usuario se encuentra inactiva."
-            });
-        }
-
-        // 3. Verificar la contraseña usando BCrypt
-        // Compara el password en texto plano enviado por el cliente 
-        // con el password_hash encriptado guardado en la BD
         const isPasswordValid = await bcrypt.compare(password, usuario.password_hash);
 
         if (!isPasswordValid) {
-            return res.status(401).json({
-                error: "Unauthorized",
-                message: "Credenciales inválidas. Contraseña incorrecta."
+            return credencialesInvalidas();
+        }
+
+        // CU-01 E-04: credenciales correctas pero cuenta inactiva
+        if (usuario.estado === false) {
+            return res.status(403).json({
+                error: "Forbidden",
+                message: "Su cuenta se encuentra inactiva. Comuníquese con el Administrador."
             });
         }
 
-        // 4. Generar el Token JWT
-        // Creamos el Payload (la información que viajará dentro del token)
-        // NUNCA pongas contraseñas u otra información sensible aquí.
         const tokenPayload = {
-            id: usuario.id_usuario,
-            email: usuario.email,
+            id_usuario: usuario.id_usuario,
+            id_rol: usuario.id_rol,
+            correo: usuario.correo,
             rol: usuario.rol
         };
 
-        // Firmamos el token con nuestra variable secreta del .env
-        // y le damos un tiempo de expiración (ej: 8 horas)
-        const token = jwt.sign(
-            tokenPayload,
-            process.env.JWT_SECRET,
-            { expiresIn: '8h' }
-        );
+        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION });
 
-        // 5. Devolver respuesta exitosa al cliente
+        await pool.query('UPDATE usuarios SET ultimo_acceso = now() WHERE id_usuario = $1', [usuario.id_usuario]);
+
         res.status(200).json({
             message: "Autenticación exitosa",
             token: token,
             user: {
                 id: usuario.id_usuario,
-                email: usuario.email,
+                email: usuario.correo,
+                nombre_completo: usuario.nombre_completo,
                 rol: usuario.rol
             }
         });
@@ -396,11 +416,9 @@ app.post('/api/auth/login', async (req, res) => {
 
 // =====================================================================
 // ENDPOINT 5: POST /api/auth/logout (Tarea SCRUM-17)
-// Invalidar token JWT usando Blacklist en Base de Datos
 // =====================================================================
 app.post('/api/auth/logout', async (req, res) => {
     try {
-        // 1. Extraer el token de la cabecera Authorization (Bearer Token)
         const authHeader = req.headers['authorization'];
 
         if (!authHeader) {
@@ -410,8 +428,6 @@ app.post('/api/auth/logout', async (req, res) => {
             });
         }
 
-        // El formato suele ser "Bearer eyJhbGciOiJIUzI1NiIs..."
-        // Separamos el string para obtener solo el token
         const token = authHeader.split(' ')[1];
 
         if (!token) {
@@ -421,20 +437,16 @@ app.post('/api/auth/logout', async (req, res) => {
             });
         }
 
-        // 2. Insertar el token en la tabla de lista negra
         const insertBlacklistQuery = 'INSERT INTO jwt_blacklist (token) VALUES ($1)';
 
         try {
             await pool.query(insertBlacklistQuery, [token]);
         } catch (dbError) {
-            // Si el token ya está en la lista negra (violación de UNIQUE), no hacemos nada
-            // y simplemente respondemos que el logout fue exitoso.
             if (dbError.code !== '23505') {
-                throw dbError; // Si es otro error de BD, lo lanzamos al catch principal
+                throw dbError;
             }
         }
 
-        // 3. Responder al cliente
         res.status(200).json({
             message: "Cierre de sesión exitoso. El token ha sido invalidado."
         });
@@ -448,9 +460,9 @@ app.post('/api/auth/logout', async (req, res) => {
     }
 });
 
-// Iniciar el servidor
+// =====================================================================
+// INICIALIZACIÓN DEL SERVIDOR
+// =====================================================================
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
 });
-
-app.use('/api/users', usuariosRoutes);

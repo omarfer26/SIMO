@@ -2,7 +2,9 @@ node_modules
 npm-debug.log
 .env
 .git
-db
+# db/ tiene SQL que la API no necesita, pero db/index.js sí se usa
+db/*
+!db/index.js
 tests
 scripts
 *.md

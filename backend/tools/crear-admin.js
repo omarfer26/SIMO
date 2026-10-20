@@ -7,7 +7,7 @@
 // Si no se define ADMIN_PASSWORD, genera una contraseña aleatoria y la
 // muestra UNA sola vez en la consola.
 const crypto = require('node:crypto');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const pool = require('../src/config/db');
 const { buscarPorCorreoOUsuario, crearUsuario } = require('../src/repositories/usuarios.repository');
 
