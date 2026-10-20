@@ -10,7 +10,7 @@ const ventasRoutes = require('./routes/ventasRoutes');
 // Módulos de seguridad (SCRUM-127)
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
-const { sanitizarXss } = require('./middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
+const { sanitizarXss } = require('./src/middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
 const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
 const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
 
