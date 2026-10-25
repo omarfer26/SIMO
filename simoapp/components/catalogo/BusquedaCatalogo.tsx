@@ -10,6 +10,7 @@
 //    la combinación de filtros elegida.
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type {
   FiltroCategoria,
   FiltroDisponibilidad,
@@ -33,12 +34,19 @@ interface BusquedaCatalogoProps {
   onTrasladar?: (producto: Producto) => void;
   /** SCRUM-38 (Camilo) — Si se pasa, cada tarjeta muestra "Ajustar stock". */
   onAjustar?: (producto: Producto) => void;
+  /** SCRUM-39 (Camilo) — Si se pasa, cada tarjeta muestra el enlace "Ver Kardex". */
+  hrefKardex?: (producto: Producto) => string;
 }
 
 // SCRUM-124 (Camilo) — Formato para las cantidades de Bodega y Almacén.
 const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
 
-export default function BusquedaCatalogo({ productos, onTrasladar, onAjustar }: BusquedaCatalogoProps) {
+export default function BusquedaCatalogo({
+  productos,
+  onTrasladar,
+  onAjustar,
+  hrefKardex,
+}: BusquedaCatalogoProps) {
   const [texto, setTexto] = useState("");
   const [categoria, setCategoria] = useState<FiltroCategoria>("todas");
   const [disponibilidad, setDisponibilidad] =
@@ -225,12 +233,23 @@ export default function BusquedaCatalogo({ productos, onTrasladar, onAjustar }: 
                   {producto.categoria} · {producto.unidadMedida}
                 </p>
 
-                {/* SCRUM-124 (Camilo) — Dónde está el stock. */}
-                <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                  Bodega <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockBodega)}</strong>
-                  {" · "}
-                  Almacén <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockAlmacen)}</strong>
-                </p>
+                {/* SCRUM-124 (Camilo) — Dónde está el stock.
+                    SCRUM-39 (Camilo) — A la derecha, el enlace al Kardex. */}
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <p className="text-zinc-600 dark:text-zinc-400">
+                    Bodega <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockBodega)}</strong>
+                    {" · "}
+                    Almacén <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockAlmacen)}</strong>
+                  </p>
+                  {hrefKardex && (
+                    <Link
+                      href={hrefKardex(producto)}
+                      className="shrink-0 font-medium text-emerald-700 hover:underline dark:text-emerald-400"
+                    >
+                      Ver Kardex
+                    </Link>
+                  )}
+                </div>
 
                 <div className="mt-auto flex items-center justify-between pt-2">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">

@@ -105,6 +105,7 @@ export default function CatalogoPage() {
               setAperturas((n) => n + 1);
               setTrasladando(true);
             }}
+            hrefKardex={(producto) => `/kardex?producto=${producto.id}`}
             onAjustar={(producto) => {
               setIdAjuste(producto.id);
               setAperturas((n) => n + 1);
