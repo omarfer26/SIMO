@@ -471,6 +471,6 @@ app.post('/api/auth/logout', async (req, res) => {
 // =====================================================================
 // INICIALIZACIÓN DEL SERVIDOR
 // =====================================================================
-app.listen(port, () => {
-    console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`Servidor de inventario corriendo en http://0.0.0.0:${port}`);
 });
