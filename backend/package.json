@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:integracion": "node -r dotenv/config --test \"tests/integracion/*.test.js\"",
     "start": "node index.js",
     "dev": "nodemon -r dotenv/config index.js"
   },
@@ -12,12 +13,25 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "pg": "^8.23.0"
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.1",
+    "xss-clean": "^0.1.4"
   },
   "devDependencies": {
-    "dotenv": "^18.0.3",
-    "nodemon": "^3.1.14"
+    "dotenv": "^18.0.7",
+    "jest": "^30.5.2",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.3.1"
+  },
+  "jest": {
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/integracion/"
+    ]
   }
 }

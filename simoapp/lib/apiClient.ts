@@ -2,9 +2,9 @@ import axios from 'axios';
 import { cerrarSesion, leerToken } from './auth/sesion';
 
 // baseURL apuntará al backend o a un host de desarrollo
-// Si no hay variable de entorno, por defecto usa http://localhost:3000/api
+// Si no hay variable de entorno, por defecto usa http://localhost:3001/api
 const apiClient = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api',
   headers: {
     'Content-Type': 'application/json',
   },

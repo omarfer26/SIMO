@@ -37,6 +37,7 @@ yarn-error.log*
 # env files
 .env
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -44,3 +45,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+simoapp/.next/
+
+# Despliegue: secretos y respaldos de la base de datos
+deploy/.env
+deploy/backups/

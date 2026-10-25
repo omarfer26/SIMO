@@ -56,11 +56,12 @@ DB_USER=postgres
 DB_PASSWORD=123456
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=retail
+DB_NAME=simo_retail
 PORT=3000
+SIMO_SEED=true
 ```
 
-### 🚀 Guía de Inicio Rápido
+Al crear el contenedor por primera vez, PostgreSQL ejecuta automáticamente las migraciones de `backend/db/migrations` y los datos de prueba de `backend/db/seeds` (ver `backend/db/README.md`).
 
 **Requisitos Previos**: Tener Docker Desktop instalado y en ejecución.
 
@@ -112,7 +113,7 @@ docker-compose down -v
 Puedes conectarte desde cualquier cliente local con los siguientes datos:
 - **Host**: localhost
 - **Puerto**: 5432
-- **Base de Datos**: retail
+- **Base de Datos**: simo_retail
 - **Usuario**: postgres
 - **Contraseña**: 123456
 
@@ -127,11 +128,117 @@ Una vez levantados los contenedores, puedes probar el endpoint de creación de p
 ```json
 {
   "id_categoria": 1,
-  "codigo_barras": "7701234567890",
+  "id_unidad": 1,
+  "sku": "7701234567890",
   "nombre": "Teclado Mecánico RGB",
   "descripcion": "Teclado para juegos con switches red",
   "precio_compra": 45.00,
   "precio_venta": 75.00,
-  "stock_minimo": 5
+  "stock_minimo_bodega": 10,
+  "stock_minimo_almacen": 5
 }
+
+## 👤 Endpoints de Usuarios (SCRUM-22, SCRUM-23)
+
+> Protegidos con JWT (`Authorization: Bearer <token>` de `POST /api/auth/login`). Listar y consultar: `ADMIN` y `GERENTE`; crear, editar y cambiar estado: `ADMIN`.
+
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| POST | `/api/users` | Crea un usuario. Body: `id_rol`, `nombre_completo`, `correo`, `usuario`, `password` (mín. 8) |
+| GET | `/api/users` | Lista paginada. Query opcional: `page`, `limit` (1-100, por defecto 10), `estado` (`true`/`false`), `id_rol`, `rol` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`), `q` (busca en nombre, correo o usuario) |
+| GET | `/api/users/:id` | Detalle de un usuario |
+| PUT | `/api/users/:id` | Edita `id_rol`, `nombre_completo`, `correo` y/o `usuario` (al menos uno). No cambia la contraseña ni el estado. No permite quitar el rol al último administrador activo (`409`) |
+| PATCH | `/api/users/:id/status` (alias `/estado`) | Activa o inactiva: `{ "estado": true \| false }`. Inactivar corta de inmediato las sesiones abiertas e impide el login. No permite inactivar al último administrador activo (`409`) |
+
+Ejemplo: `GET /api/users?rol=VENDEDOR&estado=true&page=1&limit=10`
+
+```json
+{
+  "data": [
+    { "id_usuario": 4, "nombre_completo": "Vendedor SIMO", "correo": "vendedor@simo.local", "usuario": "vendedor",
+      "estado": true, "id_rol": 4, "rol_codigo": "VENDEDOR", "rol_nombre": "Vendedor",
+      "bloqueado_hasta": null, "ultimo_acceso": null, "creado_en": "...", "actualizado_en": "..." }
+  ],
+  "pagination": { "page": 1, "limit": 10, "total": 1, "totalPages": 1 }
+}
+```
+
+Errores: `400` parámetros inválidos, `404` usuario inexistente, `409` correo o usuario duplicado (en `PUT`, si pertenecen a **otro** usuario) o intento de dejar el sistema sin administradores. Formato: `{ "error": "Bad Request", "message": "..." }`. La contraseña nunca se devuelve.
+
+**Pruebas automáticas** (requieren la base creada con el seed): `npm test`
+
+### 📦 Ingreso de mercancía a Bodega (SCRUM-94 / HU-05)
+
+> Pendiente de protección con JWT + roles `INVENTARIO` / `ADMIN` (SCRUM-16 / SCRUM-18). Mientras tanto, el usuario responsable se envía en `id_usuario`.
+
+`POST /api/inventory/entries` registra una compra a proveedor: suma **únicamente** al stock de Bodega y deja el movimiento en el Kardex, todo en una sola operación atómica.
+
+| Campo | Obligatorio | Descripción |
+| :--- | :--- | :--- |
+| `id_producto` o `sku` | Sí (uno de los dos) | Producto que ingresa; debe existir y estar activo |
+| `cantidad` | Sí | Mayor a cero; entera si el producto se maneja por unidad, hasta 3 decimales si es por kg / g / L |
+| `id_usuario` | Sí (temporal) | Usuario responsable del ingreso |
+| `costo_unitario` | No | Costo de esta compra; por defecto, el precio de compra del producto |
+| `id_proveedor` | No | Proveedor de la mercancía |
+| `documento_referencia` | No | Número de la factura o remisión del proveedor |
+| `observacion` | No | Nota libre (máx. 500 caracteres) |
+
+```json
+{ "sku": "ELEC-001", "cantidad": 10, "id_usuario": 3, "id_proveedor": 1, "documento_referencia": "FAC-0001" }
+```
+
+Respuesta `201`:
+
+```json
+{
+  "message": "Ingreso a Bodega registrado exitosamente",
+  "movimiento": { "id_movimiento": 1, "tipo_movimiento": "ENTRADA_COMPRA", "ubicacion_destino": "BODEGA",
+                  "cantidad": "10.000", "costo_unitario": "58400.00", "saldo_bodega": "10.000", "saldo_almacen": "0.000",
+                  "id_usuario": 3, "id_proveedor": 1, "documento_referencia": "FAC-0001", "observacion": null, "fecha_movimiento": "..." },
+  "producto": { "id_producto": 1, "sku": "ELEC-001", "nombre": "Audífonos Bluetooth X200",
+                "stock_bodega": "10.000", "stock_almacen": "0.000", "stock_total": "10.000" }
+}
+```
+
+Errores: `400` datos inválidos (p. ej. "La cantidad ingresada debe ser mayor a cero"), `404` producto inexistente, `409` producto inactivo.
+
+### 🧾 Compras a proveedor (SCRUM-45)
+
+> Protegido con JWT; roles `INVENTARIO` / `ADMIN` (consulta también `GERENTE`).
+
+`POST /api/inventory/purchases` registra una compra con varias líneas y, por defecto, la **confirma**: todas las líneas ingresan a Bodega en una sola operación con el procedimiento `sp_confirmar_compra`. Si una línea es inválida no se registra nada.
+
+```json
+{ "id_proveedor": 1, "documento_referencia": "FAC-0001",
+  "lineas": [ { "sku": "ELEC-001", "cantidad": 10, "costo_unitario": 58000 }, { "id_producto": 3, "cantidad": 2.5 } ] }
+```
+
+- `confirmar: false` la deja en `BORRADOR` sin mover el stock.
+- Sin `costo_unitario`, la línea usa el precio de compra del producto.
+- `GET /api/inventory/purchases/:id` devuelve la compra con sus líneas y el stock actual de cada producto.
+- Errores: `400` datos inválidos o producto repetido, `404` producto o compra inexistente, `409` producto inactivo.
+- Una compra confirmada no se puede modificar (lo impide la base de datos).
+
+### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
+
+> Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).
+
+| Método | Ruta | Descripción |
+| :--- | :--- | :--- |
+| POST | `/api/customers` | Registra un cliente. Body: `identificacion` y `nombre` (obligatorios), `tipo_identificacion` (`CC` por defecto; `CE`, `NIT`, `TI`, `PAS`), `telefono`, `correo`, `direccion` |
+| GET | `/api/customers` | Lista paginada. Query: `q` (documento por prefijo, aunque se escriba con puntos, o nombre), `estado` (`true`/`false`), `page`, `limit` (1-100, por defecto 10). Pensado para el autocompletado del POS |
+| GET | `/api/customers/document/:documento` | Busca por documento exacto |
+| GET | `/api/customers/:id` | Detalle del cliente |
+| PUT | `/api/customers/:id` | Edita `nombre`, `telefono`, `correo`, `direccion` o `estado`. **El documento no se puede modificar** |
+| GET | `/api/customers/:id/history` | Historial: resumen (compras completadas, total comprado, última compra, pedidos abiertos) y las últimas compras y pedidos (`limit`, por defecto 20) |
+
+- El documento se guarda sin puntos ni espacios: `1.090.123.456` → `1090123456`.
+- Si el documento ya existe, `POST` responde `409` con el mensaje *"El documento de identidad ya se encuentra registrado."* y devuelve el cliente existente en `cliente`, para cargarlo en pantalla.
+- Errores: `400` datos inválidos, `404` cliente inexistente, `409` documento duplicado.
+
+---
+
+## 🚀 Despliegue
+
+El despliegue del sistema (PostgreSQL, API, frontend, respaldos diarios y Cloudflare Tunnel) está en la carpeta `deploy/`. Ver `deploy/README.md` para la operación y `deploy/GUIA_EQUIPO.md` para conectarse a la base de datos compartida.
 ```

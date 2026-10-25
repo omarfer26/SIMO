@@ -273,6 +273,7 @@ export default function VentasPage() {
     0
   );
 
+
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8 relative">
       {/* Toast Notification Error/Agotado */}
