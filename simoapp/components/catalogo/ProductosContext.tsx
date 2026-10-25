@@ -38,6 +38,7 @@ interface ProductosContextValue {
   origen: OrigenProductos;
   agregarProducto: (datos: ProductoNuevo) => Promise<void>;
   descontarStock: (vendidos: { id: number; cantidad: number }[]) => void;
+  reponerStock: (devueltos: { id: number; cantidad: number }[]) => void;
   actualizarUbicaciones: (id: number, saldoBodega: number, saldoAlmacen: number) => void;
   limpiarProductos: () => void;
 }
@@ -242,6 +243,22 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  // SCRUM-Anulacion — Al anular una venta autorizada, se restituye el stock
+  // al Almacén (o en general al stock actual) para mantener la consistencia en el catálogo.
+  function reponerStock(devueltos: { id: number; cantidad: number }[]) {
+    setProductos((actuales) =>
+      actuales.map((producto) => {
+        const itemDevuelto = devueltos.find((d) => d.id === producto.id);
+        if (!itemDevuelto) return producto;
+        return {
+          ...producto,
+          stockAlmacen: producto.stockAlmacen + itemDevuelto.cantidad,
+          stockActual: producto.stockActual + itemDevuelto.cantidad,
+        };
+      }),
+    );
+  }
+
   // SCRUM-124 (Camilo) — Después de registrar un traslado, deja en pantalla
   // los saldos que respondió el backend (o el mock). El total no cambia: la
   // mercancía solo pasa de Bodega a Almacén.
@@ -266,6 +283,7 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
         origen,
         agregarProducto,
         descontarStock,
+        reponerStock,
         actualizarUbicaciones,
         limpiarProductos,
       }}

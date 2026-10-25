@@ -61,3 +61,69 @@ export interface VentaRegistrada {
   fecha: string;
   total: number;
 }
+
+// SCRUM-Anulacion: Estado de una venta
+export type EstadoVenta = "COMPLETADA" | "ANULADA";
+
+// Línea de detalle de venta en el historial
+export interface DetalleVentaItem {
+  idProducto: number;
+  nombreProducto: string;
+  codigoProducto: string;
+  cantidad: number;
+  precioUnitario: number;
+  subtotal: number;
+}
+
+// Representación completa de una venta en el historial
+export interface VentaHistorial {
+  idVenta: number;
+  fecha: string;
+  total: number;
+  subtotal: number;
+  descuento: number;
+  impuestos: number;
+  metodoPago: CodigoMetodoPago;
+  estado: EstadoVenta;
+  cliente: {
+    id?: number | null;
+    nombre: string;
+    documento?: string;
+  } | null;
+  vendedor: {
+    id?: number | null;
+    nombre: string;
+  } | null;
+  items: DetalleVentaItem[];
+  // Datos de auditoría si fue anulada
+  anulacion?: {
+    fecha: string;
+    autorizadoPor: string;
+    idAutorizador: number;
+    rolAutorizador: string;
+    motivo: string;
+  };
+}
+
+// Parámetros para autorizar y anular una venta
+export interface DatosAnulacionVenta {
+  idVenta: number;
+  motivo: string;
+  // Credenciales gerenciales
+  credenciales: {
+    correo: string;
+    password: string;
+  };
+}
+
+// Resultado de una anulación
+export interface ResultadoAnulacion {
+  idVenta: number;
+  fechaAnulacion: string;
+  autorizadoPor: {
+    id: number;
+    nombre: string;
+    rol: string;
+  };
+  mensaje: string;
+}
