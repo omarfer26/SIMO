@@ -21,3 +21,31 @@ export interface TrasladoRegistrado {
   saldoBodega: number;
   saldoAlmacen: number;
 }
+
+// SCRUM-38 (Camilo) — Tipos del ajuste manual de stock. Un ajuste es un
+// movimiento AJUSTE_POSITIVO (suma a una ubicación) o AJUSTE_NEGATIVO (resta
+// de una ubicación), y siempre lleva motivo (chk_movimiento_motivo_ajuste).
+export type TipoAjuste = "AJUSTE_POSITIVO" | "AJUSTE_NEGATIVO";
+export type Ubicacion = "BODEGA" | "ALMACEN";
+
+// Lo que llena el Encargado de Inventario en el formulario. Quien registra
+// (id_usuario) lo saca el backend del token.
+export interface DatosAjuste {
+  idProducto: number;
+  tipo: TipoAjuste;
+  ubicacion: Ubicacion;
+  cantidad: number;
+  justificacion: string;
+}
+
+// Lo que responde el servicio cuando el ajuste quedó registrado.
+export interface AjusteRegistrado {
+  idMovimiento: number;
+  fecha: string;
+  tipo: TipoAjuste;
+  ubicacion: Ubicacion;
+  cantidad: number;
+  /** Saldos del producto DESPUÉS del ajuste. */
+  saldoBodega: number;
+  saldoAlmacen: number;
+}
