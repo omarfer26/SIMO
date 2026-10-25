@@ -55,6 +55,22 @@ export async function listarPedidos(): Promise<Pedido[]> {
   return (data.data as FilaPedido[]).map(aPedido);
 }
 
+export async function actualizarEstadoPedido(
+  idPedido: number,
+  nuevoEstado: EstadoPedido,
+): Promise<{ id: number; estado: EstadoPedido }> {
+  if (USAR_MOCK) return actualizarEstadoPedidoMock(idPedido, nuevoEstado);
+
+  const { data } = await apiClient.patch(`/orders/${idPedido}/status`, {
+    estado: nuevoEstado,
+  });
+
+  return {
+    id: idPedido,
+    estado: data.estado || nuevoEstado,
+  };
+}
+
 export function mensajeErrorPedidos(error: unknown): string {
   if (isAxiosError(error) && !error.response) {
     return "No pudimos conectar con el servidor. Revisa la conexión e inténtalo de nuevo.";
@@ -101,8 +117,26 @@ const datosMock: [number, string, string, EstadoPedido, number, number, number, 
   [1012, "Juan Sebastián Rincón", "Carlos Inventario", "REGISTRADO", 0, 8, 2, 47900],
 ];
 
-async function listarPedidosMock(): Promise<Pedido[]> {
-  await esperar(500);
+const CLAVE_STORAGE_PEDIDOS = "simo.pedidos.mock";
+
+function obtenerPedidosMemoria(): Pedido[] {
+  if (typeof window !== "undefined") {
+    try {
+      const guardado = localStorage.getItem(CLAVE_STORAGE_PEDIDOS);
+      if (guardado) {
+        const parsed = JSON.parse(guardado) as Array<Omit<Pedido, "fechaSolicitud" | "fechaEntregaPactada"> & { fechaSolicitud: string; fechaEntregaPactada: string }>;
+        return parsed.map((p) => ({
+          ...p,
+          fechaSolicitud: new Date(p.fechaSolicitud),
+          fechaEntregaPactada: new Date(p.fechaEntregaPactada),
+        }));
+      }
+    } catch {
+      // Si falla localStorage, usa semilla
+    }
+  }
+
+  // Generar desde datosMock iniciales
   return datosMock.map(([id, cliente, registradoPor, estado, dias, hora, entrega, total]) => {
     const fechaSolicitud = haceDias(dias, hora, (id * 7) % 60);
     return {
@@ -115,4 +149,37 @@ async function listarPedidosMock(): Promise<Pedido[]> {
       total,
     };
   });
+}
+
+function guardarPedidosMemoria(pedidos: Pedido[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CLAVE_STORAGE_PEDIDOS, JSON.stringify(pedidos));
+  } catch (err) {
+    console.error("Error guardando pedidos en storage:", err);
+  }
+}
+
+async function listarPedidosMock(): Promise<Pedido[]> {
+  await esperar(400);
+  const pedidos = obtenerPedidosMemoria();
+  // Asegurar que quede guardado en storage para cambios futuros
+  guardarPedidosMemoria(pedidos);
+  return pedidos;
+}
+
+async function actualizarEstadoPedidoMock(
+  idPedido: number,
+  nuevoEstado: EstadoPedido,
+): Promise<{ id: number; estado: EstadoPedido }> {
+  await esperar(300);
+  const pedidos = obtenerPedidosMemoria();
+  const indice = pedidos.findIndex((p) => p.id === idPedido);
+  if (indice === -1) {
+    throw new Error(`Pedido #${idPedido} no encontrado.`);
+  }
+
+  pedidos[indice].estado = nuevoEstado;
+  guardarPedidosMemoria(pedidos);
+  return { id: idPedido, estado: nuevoEstado };
 }

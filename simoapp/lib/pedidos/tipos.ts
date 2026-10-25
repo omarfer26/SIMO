@@ -23,6 +23,26 @@ export const NOMBRES_ESTADO: Record<EstadoPedido, string> = {
   CANCELADO: "Cancelado",
 };
 
+// Secuencia progresiva estándar del ciclo de vida del pedido
+export const CICLO_PROGRESIVO: EstadoPedido[] = [
+  "REGISTRADO",
+  "CONFIRMADO",
+  "EN_PREPARACION",
+  "LISTO",
+  "ENTREGADO",
+];
+
+// Matriz de transiciones permitidas según regla de negocio (RN-04):
+// Un pedido cancelado o entregado ya no avanza. Puede cancelarse desde cualquier estado previo a ENTREGADO.
+export const TRANSICIONES_VALIDAS: Record<EstadoPedido, EstadoPedido[]> = {
+  REGISTRADO: ["CONFIRMADO", "CANCELADO"],
+  CONFIRMADO: ["EN_PREPARACION", "CANCELADO"],
+  EN_PREPARACION: ["LISTO", "CANCELADO"],
+  LISTO: ["ENTREGADO", "CANCELADO"],
+  ENTREGADO: [],
+  CANCELADO: [],
+};
+
 export interface Pedido {
   id: number;
   cliente: string;
