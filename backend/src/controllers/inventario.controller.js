@@ -7,6 +7,7 @@ const {
     obtenerCompra,
     existenProductos,
     idsPorSku,
+    registrarAjuste,
 } = require('../repositories/inventario.repository');
 
 const REGEX_ENTERO_POSITIVO = /^[1-9]\d*$/;
@@ -20,6 +21,9 @@ const ERRORES_NEGOCIO = {
     SM005: [400, 'Bad Request'],
     SM006: [400, 'Bad Request'],
     SM007: [400, 'Bad Request'],
+    SM014: [409, 'Conflict'],
+    SM015: [400, 'Bad Request'],
+    SM016: [400, 'Bad Request'],
 };
 
 function badRequest(res, message) {
@@ -265,4 +269,80 @@ async function getCompra(req, res) {
     }
 }
 
-module.exports = { postIngresoBodega, postCompra, getCompra };
+// =====================================================================
+// POST /api/inventory/adjustments (SCRUM-42, contrato del frontend SCRUM-38)
+// Body: { id_producto, tipo_movimiento: AJUSTE_POSITIVO | AJUSTE_NEGATIVO,
+//         ubicacion: BODEGA | ALMACEN, cantidad, motivo, costo_unitario? }
+// El responsable sale del token. 409 si no alcanza el stock de la ubicación.
+// =====================================================================
+const TIPOS_AJUSTE = ['AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO'];
+const UBICACIONES = ['BODEGA', 'ALMACEN'];
+
+async function postAjuste(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        const { id_producto, tipo_movimiento, ubicacion, cantidad, costo_unitario } = req.body || {};
+        // "justificacion" se acepta como sinónimo de "motivo"
+        const motivo = req.body?.motivo ?? req.body?.justificacion;
+
+        if (!REGEX_ENTERO_POSITIVO.test(String(id_producto ?? ''))) {
+            return badRequest(res, 'El id_producto es obligatorio y debe ser un entero positivo.');
+        }
+        const tipo = typeof tipo_movimiento === 'string' ? tipo_movimiento.trim().toUpperCase() : '';
+        if (!TIPOS_AJUSTE.includes(tipo)) {
+            return badRequest(res, 'El tipo_movimiento debe ser AJUSTE_POSITIVO o AJUSTE_NEGATIVO.');
+        }
+        const lugar = typeof ubicacion === 'string' ? ubicacion.trim().toUpperCase() : '';
+        if (!UBICACIONES.includes(lugar)) {
+            return badRequest(res, 'La ubicacion debe ser BODEGA o ALMACEN.');
+        }
+        const cantidadNumero = aNumero(cantidad);
+        if (Number.isNaN(cantidadNumero)) {
+            return badRequest(res, 'La cantidad es obligatoria y debe ser numérica.');
+        }
+        if (cantidadNumero <= 0) {
+            return badRequest(res, 'La cantidad del ajuste debe ser mayor a cero.');
+        }
+        if (excedeDecimales(cantidadNumero, 3) || cantidadNumero > 999999999) {
+            return badRequest(res, 'La cantidad admite máximo 3 decimales y 9 dígitos enteros.');
+        }
+        if (typeof motivo !== 'string' || !motivo.trim()) {
+            return badRequest(res, 'El motivo del ajuste es obligatorio.');
+        }
+        if (motivo.length > 500) {
+            return badRequest(res, 'El motivo admite máximo 500 caracteres.');
+        }
+        let costoNumero = null;
+        if (costo_unitario !== undefined && costo_unitario !== null) {
+            costoNumero = aNumero(costo_unitario);
+            if (Number.isNaN(costoNumero) || costoNumero < 0 || excedeDecimales(costoNumero, 2)) {
+                return badRequest(res, 'El costo_unitario debe ser un número no negativo con máximo 2 decimales.');
+            }
+        }
+
+        const a = await registrarAjuste({
+            idProducto: Number(id_producto),
+            tipo,
+            ubicacion: lugar,
+            cantidad: cantidadNumero,
+            motivo: motivo.trim(),
+            idUsuario: Number(idUsuario),
+            costoUnitario: costoNumero,
+        });
+
+        return res.status(201).json({ message: 'Ajuste registrado', ajuste: a });
+    } catch (error) {
+        const negocio = ERRORES_NEGOCIO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        console.error('[POST /api/inventory/adjustments] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al registrar el ajuste.' });
+    }
+}
+
+module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste };

@@ -34,6 +34,15 @@ async function ingresar(cuerpo, tokenSesion = token) {
     return { status: res.status, body: await res.json() };
 }
 
+async function ajustar(cuerpo, tokenSesion = token) {
+    const res = await fetch(`http://localhost:${PORT}/api/inventory/adjustments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(tokenSesion ? { Authorization: `Bearer ${tokenSesion}` } : {}) },
+        body: JSON.stringify(cuerpo),
+    });
+    return { status: res.status, body: await res.json() };
+}
+
 async function stock(idProducto) {
     const { rows } = await pool.query(
         'SELECT stock_bodega::float AS bodega, stock_almacen::float AS almacen FROM productos WHERE id_producto = $1',
@@ -60,6 +69,8 @@ async function preparar() {
     ref.concurrente = await crearProducto(`TEST-C-${SUFIJO}`, 'und');
     ref.compraUnd = await crearProducto(`TEST-PU-${SUFIJO}`, 'und');
     ref.compraKg = await crearProducto(`TEST-PK-${SUFIJO}`, 'kg');
+    ref.ajuste = await crearProducto(`TEST-AJ-${SUFIJO}`, 'und');
+    ref.ajusteConcurrente = await crearProducto(`TEST-AC-${SUFIJO}`, 'und');
     ref.usuario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
     ref.proveedor = (await pool.query(`SELECT min(id_proveedor) AS id FROM proveedores`)).rows[0].id;
 
@@ -192,6 +203,9 @@ caso('25 ingresos simultáneos sobre el mismo producto no pierden unidades', asy
     );
     assert.ok(respuestas.every((r) => r.status === 201));
     assert.deepEqual(await stock(ref.concurrente), { bodega: N * 2, almacen: 0 });
+    // El Kardex ordenado por fecha debe cuadrar aunque las operaciones fueran simultáneas (014)
+    const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.concurrente]);
+    assert.equal(rows[0].consistente, true);
 
     // Cada movimiento debe haber visto un saldo distinto: 2, 4, ..., 50
     const saldos = respuestas.map((r) => Number(r.body.movimiento.saldo_bodega)).sort((a, b) => a - b);
@@ -280,6 +294,88 @@ caso('Compras: exige sesión y rol INVENTARIO o ADMIN', async () => {
     assert.equal((await comprar({ lineas: [{ id_producto: ref.compraUnd, cantidad: 1 }] }, null)).status, 401);
     const vendedor = await iniciarSesion(PORT, 'vendedor@simo.local');
     assert.equal((await comprar({ lineas: [{ id_producto: ref.compraUnd, cantidad: 1 }] }, vendedor)).status, 403);
+});
+
+// ------------------------------ Ajustes manuales (SCRUM-42) ------------------------------
+
+caso('Ajuste negativo con el contrato del frontend: resta de la ubicación y responde los saldos (SCRUM-38)', async () => {
+    assert.equal((await ingresar({ id_producto: ref.ajuste, cantidad: 10 })).status, 201);
+    const { status, body } = await ajustar({
+        id_producto: ref.ajuste, tipo_movimiento: 'AJUSTE_NEGATIVO', ubicacion: 'BODEGA', cantidad: 3, motivo: '3 unidades llegaron con la caja rota',
+    });
+    assert.equal(status, 201);
+    assert.equal(body.message, 'Ajuste registrado');
+    for (const campo of ['id_movimiento', 'fecha_movimiento', 'tipo_movimiento', 'ubicacion', 'cantidad', 'saldo_bodega', 'saldo_almacen']) {
+        assert.ok(body.ajuste[campo] !== undefined, `falta ${campo}`);
+    }
+    assert.equal(body.ajuste.tipo_movimiento, 'AJUSTE_NEGATIVO');
+    assert.equal(body.ajuste.ubicacion, 'BODEGA');
+    assert.equal(Number(body.ajuste.saldo_bodega), 7);
+    assert.deepEqual(await stock(ref.ajuste), { bodega: 7, almacen: 0 });
+});
+
+caso('Ajuste positivo al Almacén; responsable del token y registro en log_auditoria', async () => {
+    const { status, body } = await ajustar({
+        id_producto: ref.ajuste, tipo_movimiento: 'ajuste_positivo', ubicacion: 'almacen', cantidad: '2', justificacion: 'Sobrante de conteo',
+    });
+    assert.equal(status, 201);
+    assert.equal(body.ajuste.ubicacion, 'ALMACEN');
+    assert.deepEqual(await stock(ref.ajuste), { bodega: 7, almacen: 2 });
+    const { rows } = await pool.query(
+        `SELECT m.id_usuario, m.motivo, l.justificacion, l.id_usuario AS auditor
+         FROM movimientos_inventario m
+         JOIN log_auditoria l ON l.accion = 'AJUSTE_INVENTARIO' AND (l.datos_nuevos->>'id_movimiento')::bigint = m.id_movimiento
+         WHERE m.id_movimiento = $1`, [body.ajuste.id_movimiento]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id_usuario, ref.usuario);
+    assert.equal(rows[0].auditor, ref.usuario);
+    assert.equal(rows[0].justificacion, 'Sobrante de conteo');
+});
+
+caso('Ajustes: 409 si no alcanza el stock de esa ubicación y no cambia nada', async () => {
+    const r = await ajustar({ id_producto: ref.ajuste, tipo_movimiento: 'AJUSTE_NEGATIVO', ubicacion: 'ALMACEN', cantidad: 5, motivo: 'Merma' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /Stock insuficiente en Almacén/);
+    assert.deepEqual(await stock(ref.ajuste), { bodega: 7, almacen: 2 });
+});
+
+caso('Ajustes: valida datos y motivo (400), producto inexistente (404) e inactivo (409)', async () => {
+    const base = { id_producto: ref.ajuste, tipo_movimiento: 'AJUSTE_POSITIVO', ubicacion: 'BODEGA', cantidad: 1, motivo: 'x' };
+    for (const cambio of [
+        { motivo: '   ' }, { motivo: undefined }, { cantidad: 0 }, { cantidad: -1 }, { cantidad: 'abc' }, { cantidad: 1.5 },
+        { tipo_movimiento: 'ENTRADA_COMPRA' }, { ubicacion: 'VITRINA' }, { id_producto: 'x' }, { costo_unitario: -5 },
+    ]) {
+        const r = await ajustar({ ...base, ...cambio });
+        assert.equal(r.status, 400, JSON.stringify(cambio));
+        assert.ok(r.body.message);
+    }
+    assert.equal((await ajustar({ ...base, id_producto: 99999999 })).status, 404);
+    assert.equal((await ajustar({ ...base, id_producto: ref.inactivo })).status, 409);
+    assert.deepEqual(await stock(ref.ajuste), { bodega: 7, almacen: 2 });
+});
+
+caso('Ajustes: exige sesión y rol INVENTARIO o ADMIN; /adjust es alias', async () => {
+    const cuerpo = { id_producto: ref.ajuste, tipo_movimiento: 'AJUSTE_POSITIVO', ubicacion: 'BODEGA', cantidad: 1, motivo: 'x' };
+    assert.equal((await ajustar(cuerpo, null)).status, 401);
+    const vendedor = await iniciarSesion(PORT, 'vendedor@simo.local');
+    assert.equal((await ajustar(cuerpo, vendedor)).status, 403);
+    const res = await fetch(`http://localhost:${PORT}/api/inventory/adjust`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(cuerpo),
+    });
+    assert.equal(res.status, 201);
+    assert.deepEqual(await stock(ref.ajuste), { bodega: 8, almacen: 2 });
+});
+
+caso('20 ajustes negativos simultáneos sobre 10 unidades: salen exactamente 10, el resto 409', async () => {
+    assert.equal((await ingresar({ id_producto: ref.ajusteConcurrente, cantidad: 10 })).status, 201);
+    const respuestas = await Promise.all(Array.from({ length: 20 }, () => ajustar({
+        id_producto: ref.ajusteConcurrente, tipo_movimiento: 'AJUSTE_NEGATIVO', ubicacion: 'BODEGA', cantidad: 1, motivo: 'Prueba de concurrencia',
+    })));
+    assert.equal(respuestas.filter((r) => r.status === 201).length, 10);
+    assert.equal(respuestas.filter((r) => r.status === 409).length, 10);
+    assert.deepEqual(await stock(ref.ajusteConcurrente), { bodega: 0, almacen: 0 });
+    const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.ajusteConcurrente]);
+    assert.equal(rows[0].consistente, true);
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18

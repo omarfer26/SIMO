@@ -219,6 +219,29 @@ Errores: `400` datos inválidos (p. ej. "La cantidad ingresada debe ser mayor a 
 - Errores: `400` datos inválidos o producto repetido, `404` producto o compra inexistente, `409` producto inactivo.
 - Una compra confirmada no se puede modificar (lo impide la base de datos).
 
+### 🔧 Ajustes manuales de stock (SCRUM-42)
+
+> Protegido con JWT; roles `INVENTARIO` / `ADMIN`. Contrato del formulario del frontend (SCRUM-38).
+
+`POST /api/inventory/adjustments` (alias `/api/inventory/adjust`) corrige el stock de **una** ubicación por mermas, daños o sobrantes de conteo:
+
+```json
+{ "id_producto": 1, "tipo_movimiento": "AJUSTE_NEGATIVO", "ubicacion": "ALMACEN", "cantidad": 3, "motivo": "3 unidades llegaron con la caja rota" }
+```
+
+Responde `201`:
+
+```json
+{ "message": "Ajuste registrado",
+  "ajuste": { "id_movimiento": 123, "fecha_movimiento": "...", "tipo_movimiento": "AJUSTE_NEGATIVO", "ubicacion": "ALMACEN",
+              "cantidad": "3.000", "saldo_bodega": "8.000", "saldo_almacen": "1.000", "costo_unitario": "...", "motivo": "...", "id_usuario": 3, "id_producto": 1 } }
+```
+
+- `motivo` es obligatorio (se acepta también `justificacion`); el responsable sale del token.
+- Opcional `costo_unitario` (si no, se usa el precio de compra del producto).
+- La función `fn_registrar_ajuste` (migración 014) bloquea el producto, cambia el stock, deja el movimiento en el Kardex y el registro `AJUSTE_INVENTARIO` en `log_auditoria`, todo o nada.
+- Errores: `400` dato inválido o motivo vacío, `404` producto inexistente, `409` stock insuficiente en esa ubicación o producto inactivo.
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).

@@ -91,8 +91,24 @@ async function idsPorSku(skus) {
     return new Map(rows.map((r) => [r.sku, r.id_producto]));
 }
 
+// SCRUM-42: ajuste manual de stock. fn_registrar_ajuste bloquea el producto,
+// cambia el stock de la ubicación, deja el movimiento en el Kardex y el registro
+// en log_auditoria en una sola operación.
+async function registrarAjuste({ idProducto, tipo, ubicacion, cantidad, motivo, idUsuario, costoUnitario }) {
+    const { rows } = await pool.query(
+        `SELECT m.id_movimiento, m.fecha_movimiento, m.tipo_movimiento,
+                coalesce(m.ubicacion_destino, m.ubicacion_origen) AS ubicacion,
+                m.cantidad, m.costo_unitario, m.saldo_bodega, m.saldo_almacen,
+                m.motivo, m.id_usuario, m.id_producto
+         FROM fn_registrar_ajuste($1, $2, $3, $4, $5, $6, $7) m`,
+        [idProducto, tipo, ubicacion, cantidad, motivo, idUsuario, costoUnitario]
+    );
+    return rows[0];
+}
+
 module.exports = {
     buscarProductoPorSku,
+    registrarAjuste,
     registrarIngresoBodega,
     registrarCompra,
     obtenerCompra,
