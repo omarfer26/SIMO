@@ -260,13 +260,19 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
   }
 
   // SCRUM-124 (Camilo) — Después de registrar un traslado, deja en pantalla
-  // los saldos que respondió el backend (o el mock). El total no cambia: la
-  // mercancía solo pasa de Bodega a Almacén.
+  // los saldos que respondió el backend (o el mock).
+  // SCRUM-38 (Camilo) — Ahora también recalcula el total (stockActual),
+  // porque un ajuste sí lo cambia. En un traslado da el mismo total de antes.
   function actualizarUbicaciones(id: number, saldoBodega: number, saldoAlmacen: number) {
     setProductos((actuales) =>
       actuales.map((producto) =>
         producto.id === id
-          ? { ...producto, stockBodega: saldoBodega, stockAlmacen: saldoAlmacen }
+          ? {
+              ...producto,
+              stockBodega: saldoBodega,
+              stockAlmacen: saldoAlmacen,
+              stockActual: Math.round((saldoBodega + saldoAlmacen) * 1000) / 1000,
+            }
           : producto,
       ),
     );
