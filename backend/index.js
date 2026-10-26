@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('node:crypto');
 const JWT = require('./src/config/jwt'); // clave y expiración compartidas con el middleware
 const pool = require('./db');
 const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
@@ -402,7 +403,9 @@ app.post('/api/auth/login', async (req, res) => {
             rol: usuario.rol
         };
 
-        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION });
+        // jwtid único: sin él, dos inicios de sesión del mismo usuario en el mismo
+        // segundo daban el mismo token, y cerrar uno invalidaba también el otro.
+        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION, jwtid: randomUUID() });
 
         await pool.query('UPDATE usuarios SET ultimo_acceso = now() WHERE id_usuario = $1', [usuario.id_usuario]);
 
