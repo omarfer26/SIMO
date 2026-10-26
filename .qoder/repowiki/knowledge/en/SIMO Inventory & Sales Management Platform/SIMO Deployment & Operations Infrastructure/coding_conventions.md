@@ -1,0 +1,5 @@
+- All container-published ports bind explicitly to `127.0.0.1:<port>:<port>` so no service is reachable from the local network or the internet without going through Cloudflare.
+- Secrets and runtime configuration live in `deploy/.env` (copied from `.env.example`) and are referenced via `${VAR:-default}` substitution in compose files; `.env` and `backups/` are gitignored.
+- Database access uses the minimal-privilege `simo_app` role for the API while the superuser `postgres` is reserved for administration and backups only.
+- Backup outputs are written atomically to a `.tmp` file and renamed only after `pg_restore --list` validates the archive, preventing partial/corrupt snapshots from being considered valid.
+- Destructive operations (replacing an existing SIMO schema, restoring onto Neon) require explicit opt-in environment variables (`SIMO_REEMPLAZAR=si`, `SIMO_CONFIRMAR_NEON=si`) before proceeding.

@@ -1,0 +1,1 @@
+Next.js 16 client-side application for SIMO, an inventory, sales and orders management system built with React 19, TypeScript, Tailwind CSS v4 and Recharts.

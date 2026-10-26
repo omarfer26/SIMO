@@ -1,0 +1,6 @@
+Three-layer Express module following controller → repository separation:
+- `routes/clientes.routes.js` mounts an `express.Router` under `/api/customers`, applying `verificarToken` + `verificarRol(...ROLES)` (`VENDEDOR`, `GERENTE`, `ADMIN`) as global middleware before each handler.
+- `controllers/clientes.controller.js` implements handlers for POST/GET/PUT plus a document lookup and a history endpoint; it owns all input validation (document normalization, regex checks, pagination limits) and returns standardized `{ error, message }` JSON responses via a local `badRequest` helper. It depends only on the repository layer.
+- `repositories/clientes.repository.js` holds raw SQL against the `clientes` table (and joins `ventas`/`pedidos`/`metodos_pago` for history), using parameterized queries through the shared `../config/db` pool.
+
+Dependency direction is strictly routes → controllers → repositories → db pool; no cross-imports between siblings. The controller also handles duplicate-document conflicts by catching DB error code `23505` and returning 409 with the existing record so the frontend can prefill the form.

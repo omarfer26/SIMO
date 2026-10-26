@@ -13,9 +13,20 @@ import type {
   VentaHistorial,
   VentaRegistrada,
 } from "./tipos";
+// Historial de ejemplo (180 días de operación). Vive en su propio archivo
+// para no llenar este servicio de datos de prueba.
+import { ventasSemilla } from "./semillaVentas";
 
 const USAR_MOCK = process.env.NEXT_PUBLIC_VENTAS_MOCK !== "false";
 const STORAGE_VENTAS_KEY = "simo.ventas.historial";
+// Marca de la versión de las semillas guardadas en el navegador. Cuando los
+// datos de ejemplo cambian (v2: historial de 90 días para el Dashboard
+// Operacional; v3: 180 días, para que el período de 90 días tenga con qué
+// compararse) se reemplaza el historial local UNA sola vez; de ahí en
+// adelante se respeta lo que haya, incluidas las ventas registradas en el
+// POS. Son datos de demostración: el historial real viene de GET /api/sales.
+const STORAGE_SEMILLA_VERSION = "simo.ventas.semilla.version";
+const VERSION_SEMILLA = 3;
 
 type TipoErrorAnulacion =
   | "credenciales_invalidas"
@@ -36,68 +47,19 @@ export class ErrorAnulacion extends Error {
   }
 }
 
-// Semillas iniciales para que la interfaz cuente con historial desde el primer momento
-const ventasSemilla: VentaHistorial[] = [
-  {
-    idVenta: 1001,
-    fecha: new Date(Date.now() - 1000 * 60 * 45).toISOString(), // hace 45 minutos
-    metodoPago: "EFECTIVO",
-    estado: "COMPLETADA",
-    subtotal: 120000,
-    descuento: 0,
-    impuestos: 0,
-    total: 120000,
-    cliente: { id: 1, nombre: "Carlos Gómez", documento: "1090123456" },
-    vendedor: { id: 4, nombre: "Vendedor SIMO" },
-    items: [
-      {
-        idProducto: 1,
-        codigoProducto: "PROD-001",
-        nombreProducto: "Taladro Percutor 650W",
-        cantidad: 1,
-        precioUnitario: 120000,
-        subtotal: 120000,
-      },
-    ],
-  },
-  {
-    idVenta: 1002,
-    fecha: new Date(Date.now() - 1000 * 60 * 15).toISOString(), // hace 15 minutos
-    metodoPago: "NEQUI",
-    estado: "COMPLETADA",
-    subtotal: 95000,
-    descuento: 5000,
-    impuestos: 0,
-    total: 90000,
-    cliente: { id: null, nombre: "Consumidor Final" },
-    vendedor: { id: 4, nombre: "Vendedor SIMO" },
-    items: [
-      {
-        idProducto: 2,
-        codigoProducto: "PROD-002",
-        nombreProducto: "Caja de Herramientas 16 Pulgadas",
-        cantidad: 1,
-        precioUnitario: 70000,
-        subtotal: 70000,
-      },
-      {
-        idProducto: 3,
-        codigoProducto: "PROD-003",
-        nombreProducto: "Juego de Llaves Bristol 9 Piezas",
-        cantidad: 1,
-        precioUnitario: 25000,
-        subtotal: 25000,
-      },
-    ],
-  },
-];
-
 function leerHistorialLocal(): VentaHistorial[] {
   if (typeof window === "undefined") return ventasSemilla;
   try {
+    const versionSemilla = Number(localStorage.getItem(STORAGE_SEMILLA_VERSION) ?? 0);
+    if (versionSemilla < VERSION_SEMILLA) {
+      guardarHistorialLocal(ventasSemilla);
+      localStorage.setItem(STORAGE_SEMILLA_VERSION, String(VERSION_SEMILLA));
+      return ventasSemilla;
+    }
+
     const raw = localStorage.getItem(STORAGE_VENTAS_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_VENTAS_KEY, JSON.stringify(ventasSemilla));
+      guardarHistorialLocal(ventasSemilla);
       return ventasSemilla;
     }
     return JSON.parse(raw) as VentaHistorial[];

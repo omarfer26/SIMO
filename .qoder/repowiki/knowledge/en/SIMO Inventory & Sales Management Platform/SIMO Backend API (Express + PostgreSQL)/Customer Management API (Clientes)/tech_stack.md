@@ -1,0 +1,1 @@
+Node.js + Express Router; direct PostgreSQL access via `pg` pool from `src/config/db` with parameterized `$1/$2` placeholders and `FILTER WHERE` / `ILIKE` for aggregate history queries.

@@ -1,0 +1,1 @@
+Top-level monorepo orchestrating SIMO's Next.js frontend, Express/PostgreSQL backend API, and Docker Compose deployment into a single inventory, sales and orders management system.

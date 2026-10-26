@@ -1,0 +1,1 @@
+Node.js monorepo using npm workspaces-style scripts with `concurrently`; shared runtime is Node across backend and frontend; PostgreSQL is the sole database backing both services.

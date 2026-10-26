@@ -1,0 +1,1 @@
+Single-process Express server that wires domain route modules under /api/* prefixes, sharing one pg pool, JWT config, XSS sanitization, rate-limiting, and role-based access control.

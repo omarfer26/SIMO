@@ -1,0 +1,5 @@
+- Each domain exposes its own router file under `src/routes/<domain>.routes.js` mounted at a dedicated `/api/<domain>` prefix in the root app.
+- Domain logic follows a routes → controller → repository layering, with repositories holding parameterized SQL against the shared `pg` pool.
+- Authentication and authorization are enforced through the shared `authMiddleware` (reading the JWT secret from `src/config/jwt.js`) rather than per-route token verification.
+- All incoming JSON bodies pass through the global `sanitizarXss` middleware before reaching any route handler.
+- Error responses use a uniform `{ error, message }` shape with HTTP status codes mapped from PostgreSQL error codes (e.g. 23505 → 409 Conflict).

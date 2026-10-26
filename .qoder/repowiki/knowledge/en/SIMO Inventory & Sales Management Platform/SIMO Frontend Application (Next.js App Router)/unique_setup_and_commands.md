@@ -1,0 +1,1 @@
+Development server runs via `npm run dev` (alias of `next dev`); build via `next build`; lint via `eslint`. Backend URL defaults to `http://localhost:3001/api` unless overridden by the `NEXT_PUBLIC_API_URL` environment variable defined in `.env.local`.

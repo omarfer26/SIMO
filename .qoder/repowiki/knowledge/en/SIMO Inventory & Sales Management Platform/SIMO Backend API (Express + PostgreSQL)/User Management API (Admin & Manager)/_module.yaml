@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend_api/usuarios_auth
+title: User Management API (Admin & Manager)
+scope:
+    - backend/src/controllers/usuarios.controller.js
+    - backend/src/repositories/usuarios.repository.js
+    - backend/src/routes/usuarios.routes.js
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app

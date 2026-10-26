@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: frontend_app
+title: SIMO Frontend Application (Next.js App Router)
+scope:
+    - simoapp/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_api/clientes
+    - path: backend_api/inventario
+    - path: backend_api/usuarios_auth

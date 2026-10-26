@@ -1,0 +1,1 @@
+Node.js + Express Router; bcrypt for password hashing; pg pool for parameterized PostgreSQL queries using `$N` placeholders; PostgreSQL advisory locks (`pg_advisory_xact_lock`) for concurrent admin-state serialization.

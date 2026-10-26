@@ -1,0 +1,2 @@
+- Environment variables such as `DATABASE_URL` and `NODE_ENV` are declared once at the platform level (`railway.json`, `render.yaml`) and consumed by the backend service.
+- Health checks target the backend's `/api/health` endpoint, which is the single liveness/readiness contract between the orchestration layer and the API child.

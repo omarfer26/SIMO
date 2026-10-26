@@ -1,0 +1,22 @@
+schema_version: 1
+module_path: ""
+title: SIMO Inventory & Sales Management Platform
+scope:
+    - README.md
+    - .gitignore
+    - package.json
+    - package-lock.json
+    - railway.json
+    - render.yaml
+    - dashboard_90days_metrics.png
+    - dashboard_90days_rotation_chart.png
+    - dashboard_90dias.png
+    - dashboard_charts.png
+    - dashboard_fullpage.png
+    - dashboard_metrics.png
+    - dashboard_mobile.png
+    - dashboard_stock_table.png
+    - dashboard_viewport.png
+source_files: []
+depends_on: []
+related_to: []

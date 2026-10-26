@@ -1,0 +1,5 @@
+Three-layer split inside this module:
+- `inventario.routes.js` registers Express routers under `/api/inventory`, applying `verificarToken` + `verificarRol('INVENTARIO'|'ADMIN'|'GERENTE')` middleware before each handler.
+- `inventario.controller.js` is the HTTP boundary: it validates/normalizes request bodies (positive integers via `REGEX_ENTERO_POSITIVO`, numeric helpers `aNumero`/`excedeDecimales`, string length caps), maps business errors (`ERRORES_NEGOCIO`, `ERRORES_COMPRA`) keyed by SQLSTATE-like codes to HTTP status+message pairs, and delegates persistence to the repository. It also enforces that the actor comes from `req.user.id_usuario` (JWT session) rather than the request body.
+- `inventario.repository.js` holds raw SQL against the shared `../config/db` pool, calling stored procedures `fn_registrar_ingreso_bodega` and `sp_confirmar_compra`. `registrarCompra` opens a client connection, wraps inserts into `compras`/`detalles_compras` plus the optional confirmation call in an explicit `BEGIN`/`COMMIT` transaction with rollback on failure.
+Dependency direction is strictly routes → controller → repository; the controller never touches the DB directly.

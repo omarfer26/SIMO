@@ -1,0 +1,1 @@
+The server starts via `node backend/index.js` (default port 3001); database schema is bootstrapped through `backend/db/00_init.sh` which runs roles, migrations, seeds, and tests; Docker builds via `Dockerfile` and orchestrates the DB with `docker-compose.yml`.

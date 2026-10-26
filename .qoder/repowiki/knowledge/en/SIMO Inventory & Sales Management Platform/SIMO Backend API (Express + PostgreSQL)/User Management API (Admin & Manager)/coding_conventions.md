@@ -1,0 +1,6 @@
+- Controller handlers wrap their body in try/catch and return a uniform JSON envelope `{ error, message }` (with optional extra fields like `campos` or `usuario`), mapping domain failures to 400/404/409 and unexpected errors to 500.
+- Input validation uses dedicated regex constants (`REGEX_CORREO`, `REGEX_ENTERO_POSITIVO`) plus explicit type/length checks, rejecting early via the local `badRequest(res, message)` helper rather than throwing.
+- Repository functions accept plain option objects (e.g. `{ page, limit, estado, idRol, rolCodigo, busqueda }`) and build WHERE clauses by pushing into `condiciones`/`valores` arrays, keeping query composition free of string concatenation.
+- Mutating repository functions open a transaction via `pool.connect()` + `BEGIN`/`COMMIT`/`ROLLBACK` in a finally block, use `FOR UPDATE OF u` row-level locking, and signal business outcomes through returned sentinel objects (`noExiste`, `ultimoAdmin`) instead of exceptions.
+- Public-facing SELECT statements select from a shared `COLUMNAS_PUBLICAS` constant that explicitly omits `password_hash`, ensuring credentials are never serialized to the response.
+- Route definitions compose `verificarToken` and `verificarRol(...)` middleware inline next to each endpoint, scoping RBAC per route rather than applying it globally.

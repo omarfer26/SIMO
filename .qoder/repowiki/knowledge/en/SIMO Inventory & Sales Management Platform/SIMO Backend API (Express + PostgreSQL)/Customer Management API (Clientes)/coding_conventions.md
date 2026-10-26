@@ -1,0 +1,6 @@
+- Input validation returns a `{ campos, error }` object from a shared `validarDatos(body, parcial)` helper, letting handlers branch on `error` before calling the repository.
+- HTTP errors are emitted through a local `badRequest(res, message)` helper that always returns `res.status(400).json({ error: 'Bad Request', message })`.
+- Document identifiers are normalized via `normalizarDocumento` (strip dots/spaces, uppercase) before any comparison or DB lookup, and validated against `REGEX_DOCUMENTO`.
+- Integer parameters (`id`, `page`, `limit`) are validated with `REGEX_ENTERO_POSITO` (`/^[1-9]\d*$/`) and capped at 100 for pagination fields.
+- Repository functions use parameterized SQL with positional `$N` bindings and return `rows[0] || null` for single-row lookups.
+- Route definitions apply authentication/authorization middleware inline (`verificarToken, verificarRol(...ROLES)`) right before the handler, rather than via per-route custom middleware.

@@ -1,0 +1,1 @@
+Next.js 16.3.5 App Router with React 19.2.8, TypeScript 5, Tailwind CSS v4 via `@tailwindcss/postcss`, Recharts 3.x for dashboards, Axios for HTTP, Google Fonts (Geist).

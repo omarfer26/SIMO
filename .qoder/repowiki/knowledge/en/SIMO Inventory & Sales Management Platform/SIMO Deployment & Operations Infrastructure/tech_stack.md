@@ -1,0 +1,1 @@
+Docker Compose v2, PostgreSQL 18-alpine, Node 22 Alpine (Next.js multi-stage build), cloudflared for outbound-only Cloudflare Zero Trust tunnels, `pg_dump`/`pg_restore` custom-format dumps, OpenSSL for secret generation and encrypted GitHub Actions artifacts.

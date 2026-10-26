@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: deployment_infra
+title: SIMO Deployment & Operations Infrastructure
+scope:
+    - deploy/
+source_files: []
+depends_on: []
+related_to: []
