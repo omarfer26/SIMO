@@ -116,40 +116,40 @@ SELECT pg_temp.debe_fallar('Pedido que no inicia en REGISTRADO',
       VALUES (1, 4, 'CONFIRMADO', now() + interval '2 days')$$);
 SELECT pg_temp.debe_pasar('Pedido registrado',
     $$INSERT INTO pedidos (id_pedido, id_cliente, id_usuario, fecha_entrega_pactada)
-      VALUES (500, 1, 4, now() + interval '2 days')$$);
+      VALUES (9000500, 1, 4, now() + interval '2 days')$$);
 SELECT pg_temp.debe_fallar('Saltar de REGISTRADO a LISTO (CU-12 CA-2)',
-    $$UPDATE pedidos SET estado = 'LISTO' WHERE id_pedido = 500$$);
+    $$UPDATE pedidos SET estado = 'LISTO' WHERE id_pedido = 9000500$$);
 SELECT pg_temp.debe_pasar('Avanzar a CONFIRMADO',
-    $$UPDATE pedidos SET estado = 'CONFIRMADO' WHERE id_pedido = 500$$);
+    $$UPDATE pedidos SET estado = 'CONFIRMADO' WHERE id_pedido = 9000500$$);
 SELECT pg_temp.debe_fallar('Retroceder a REGISTRADO',
-    $$UPDATE pedidos SET estado = 'REGISTRADO' WHERE id_pedido = 500$$);
+    $$UPDATE pedidos SET estado = 'REGISTRADO' WHERE id_pedido = 9000500$$);
 SELECT pg_temp.debe_fallar('Cancelar sin motivo (CU-13 EX-2)',
-    $$UPDATE pedidos SET estado = 'CANCELADO' WHERE id_pedido = 500$$);
+    $$UPDATE pedidos SET estado = 'CANCELADO' WHERE id_pedido = 9000500$$);
 SELECT set_config('simo.motivo', 'El cliente desistió de la compra', true);
 SELECT pg_temp.debe_pasar('Cancelar con motivo',
-    $$UPDATE pedidos SET estado = 'CANCELADO' WHERE id_pedido = 500$$);
+    $$UPDATE pedidos SET estado = 'CANCELADO' WHERE id_pedido = 9000500$$);
 SELECT set_config('simo.motivo', '', true);
 SELECT pg_temp.debe_fallar('Reabrir pedido cancelado',
-    $$UPDATE pedidos SET estado = 'CONFIRMADO' WHERE id_pedido = 500$$);
+    $$UPDATE pedidos SET estado = 'CONFIRMADO' WHERE id_pedido = 9000500$$);
 DO $$
 DECLARE n INTEGER;
 BEGIN
-    SELECT count(*) INTO n FROM historial_estados_pedido WHERE id_pedido = 500;
+    SELECT count(*) INTO n FROM historial_estados_pedido WHERE id_pedido = 9000500;
     IF n <> 3 THEN
         RAISE EXCEPTION 'FALLA historial: se esperaban 3 registros y hay %', n;
     END IF;
     RAISE NOTICE 'OK   Historial registra REGISTRADO, CONFIRMADO y CANCELADO con su usuario';
 END $$;
 SELECT pg_temp.debe_fallar('Historial de pedido inalterable',
-    $$DELETE FROM historial_estados_pedido WHERE id_pedido = 500$$);
+    $$DELETE FROM historial_estados_pedido WHERE id_pedido = 9000500$$);
 SELECT set_config('simo.id_usuario', '', true);
 SELECT pg_temp.debe_fallar('Pedido sin usuario de sesión',
     $$INSERT INTO pedidos (id_cliente, id_usuario, fecha_entrega_pactada) VALUES (1, 4, now() + interval '1 day')$$);
 SELECT set_config('simo.id_usuario', '4', true);
 SELECT pg_temp.debe_pasar('Un pedido genera una sola venta: primera',
-    $$INSERT INTO ventas (id_usuario, id_pedido, id_metodo_pago) VALUES (4, 500, 1)$$);
+    $$INSERT INTO ventas (id_usuario, id_pedido, id_metodo_pago) VALUES (4, 9000500, 1)$$);
 SELECT pg_temp.debe_fallar('Un pedido genera una sola venta: segunda',
-    $$INSERT INTO ventas (id_usuario, id_pedido, id_metodo_pago) VALUES (4, 500, 1)$$);
+    $$INSERT INTO ventas (id_usuario, id_pedido, id_metodo_pago) VALUES (4, 9000500, 1)$$);
 
 -- ------------------------------ Auditoría ------------------------------
 SELECT pg_temp.debe_fallar('Ajuste auditado sin justificación',

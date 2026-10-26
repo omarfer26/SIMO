@@ -263,6 +263,29 @@ Responde `201`:
 - `saldo_coincide: false` marca un movimiento cuyo saldo guardado no cuadra; `producto.consistente` resume la auditoría del producto.
 - Errores: `400` id o fechas inválidas, `404` producto inexistente.
 
+### 📝 Pedidos de clientes (SCRUM-81 / HU-10)
+
+> Protegido con JWT. Registran `VENDEDOR` / `GERENTE` / `ADMIN`; consulta también `INVENTARIO`.
+
+`POST /api/orders` registra el pedido en estado `REGISTRADO`:
+
+```json
+{ "id_cliente": 1, "fecha_entrega_pactada": "2026-10-30", "direccion_entrega": "Calle 10 # 5-20", "observaciones": "En la mañana",
+  "lineas": [ { "id_producto": 1, "cantidad": 3 }, { "sku": "FERR-001", "cantidad": 1.25 } ] }
+```
+
+- Responde `201` con `{ message, pedido }`: cabecera, `lineas` (con `disponible` según el stock de hoy) e `historial` de estados.
+- El precio de cada línea es el **precio de venta vigente** del producto; el total lo calcula la base (migración 015).
+- Una fecha sin hora se pacta para el final de ese día (hora de Colombia) y no puede estar en el pasado.
+- **No descuenta stock**: eso ocurre al pasar a `EN_PREPARACION` (SCRUM-61). Si hoy no alcanza, la respuesta trae `advertencia`.
+- Errores: `400` datos inválidos o producto repetido, `404` cliente o producto inexistente, `409` cliente o producto inactivo.
+
+Consulta:
+
+- `GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&estado=&id_cliente=` → `{ data: [ { id_pedido, nombre_cliente, nombre_usuario, estado, fecha_solicitud, fecha_entrega_pactada, total, vencido, cantidad_productos, ... } ] }` (contrato de la lista del frontend, SCRUM-125), más recientes primero.
+- `GET /api/orders/:id` → `{ pedido }` con líneas e historial.
+- Desde `EN_PREPARACION` las líneas del pedido ya no se pueden modificar (lo impide la base de datos).
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).

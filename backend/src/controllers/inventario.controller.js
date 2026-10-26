@@ -11,8 +11,8 @@ const {
     obtenerKardex,
     resumenProductoKardex,
 } = require('../repositories/inventario.repository');
-
-const REGEX_ENTERO_POSITIVO = /^[1-9]\d*$/;
+const { aInstante } = require('../utils/fechas');
+const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../utils/numeros');
 
 // Errores de negocio de fn_registrar_ingreso_bodega (SQLSTATE clase SM) -> HTTP
 const ERRORES_NEGOCIO = {
@@ -30,20 +30,6 @@ const ERRORES_NEGOCIO = {
 
 function badRequest(res, message) {
     return res.status(400).json({ error: 'Bad Request', message });
-}
-
-// Acepta números o texto numérico ("12.5"); rechaza vacíos, NaN e infinitos.
-function aNumero(valor) {
-    if (typeof valor === 'number') return Number.isFinite(valor) ? valor : NaN;
-    if (typeof valor === 'string' && valor.trim() !== '') return Number(valor);
-    return NaN;
-}
-
-// true si el número tiene más de `maximo` decimales (tolera el error binario
-// de punto flotante y la notación científica, p. ej. 1e-7).
-function excedeDecimales(numero, maximo) {
-    const escalado = numero * 10 ** maximo;
-    return Math.abs(escalado - Math.round(escalado)) > 1e-6;
 }
 
 // =====================================================================
@@ -353,26 +339,6 @@ async function postAjuste(req, res) {
 // fecha y hora ISO 8601). Sin filtros devuelve el historial completo.
 // Los saldos no cambian al filtrar: se calculan desde el primer movimiento.
 // =====================================================================
-const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
-
-// Convierte el parámetro a un instante; las fechas sin hora se toman en hora
-// de Colombia (UTC-5) al inicio o al final del día.
-function aInstante(valor, finDelDia) {
-    if (valor === undefined || valor === '') return null;
-    if (typeof valor !== 'string') return undefined;
-    if (REGEX_FECHA.test(valor)) {
-        // Rechaza días que no existen (2026-02-30), que Date convertiría al mes siguiente
-        const [a, m, d] = valor.split('-').map(Number);
-        const calendario = new Date(Date.UTC(a, m - 1, d));
-        if (calendario.getUTCFullYear() !== a || calendario.getUTCMonth() !== m - 1 || calendario.getUTCDate() !== d) {
-            return undefined;
-        }
-        return new Date(`${valor}T${finDelDia ? '23:59:59.999' : '00:00:00.000'}-05:00`);
-    }
-    const d = new Date(valor);
-    return /^\d{4}-\d{2}-\d{2}T/.test(valor) && !Number.isNaN(d.getTime()) ? d : undefined;
-}
-
 async function getKardex(req, res) {
     try {
         const { id_producto } = req.params;
