@@ -1,7 +1,7 @@
 // src/routes/inventario.routes.js
 // Módulo de inventario. Montado en /api/inventory desde index.js.
 const express = require('express');
-const { postIngresoBodega, postCompra, getCompra, postAjuste } = require('../controllers/inventario.controller');
+const { postIngresoBodega, postCompra, getCompra, postAjuste, getKardex } = require('../controllers/inventario.controller');
 const { verificarToken, verificarRol } = require('../../middleware/authMiddleware'); // SCRUM-16 / SCRUM-18
 
 const router = express.Router();
@@ -17,5 +17,8 @@ router.get('/purchases/:id', verificarToken, verificarRol('INVENTARIO', 'ADMIN',
 // /adjustments es el contrato del frontend (SCRUM-38); /adjust, el nombre de la historia.
 router.post('/adjustments', verificarToken, verificarRol('INVENTARIO', 'ADMIN'), postAjuste);
 router.post('/adjust', verificarToken, verificarRol('INVENTARIO', 'ADMIN'), postAjuste);
+
+// SCRUM-43: Kardex cronológico de un producto (contrato del frontend SCRUM-39)
+router.get('/kardex/:id_producto', verificarToken, verificarRol('INVENTARIO', 'ADMIN', 'GERENTE'), getKardex);
 
 module.exports = router;

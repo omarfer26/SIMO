@@ -43,6 +43,17 @@ async function ajustar(cuerpo, tokenSesion = token) {
     return { status: res.status, body: await res.json() };
 }
 
+async function kardex(idProducto, query = '', tokenSesion = token) {
+    const res = await fetch(`http://localhost:${PORT}/api/inventory/kardex/${idProducto}${query}`, {
+        headers: tokenSesion ? { Authorization: `Bearer ${tokenSesion}` } : {},
+    });
+    return { status: res.status, body: await res.json() };
+}
+
+// Fecha de hoy en Colombia (UTC-5), formato AAAA-MM-DD
+const diaColombia = (desplazamientoDias = 0) =>
+    new Date(Date.now() - 5 * 3600e3 + desplazamientoDias * 86400e3).toISOString().slice(0, 10);
+
 async function stock(idProducto) {
     const { rows } = await pool.query(
         'SELECT stock_bodega::float AS bodega, stock_almacen::float AS almacen FROM productos WHERE id_producto = $1',
@@ -376,6 +387,60 @@ caso('20 ajustes negativos simultáneos sobre 10 unidades: salen exactamente 10,
     assert.deepEqual(await stock(ref.ajusteConcurrente), { bodega: 0, almacen: 0 });
     const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.ajusteConcurrente]);
     assert.equal(rows[0].consistente, true);
+});
+
+// ------------------------------ Consulta del Kardex (SCRUM-43) ------------------------------
+// Usa el producto de los ajustes: ingreso 10, ajuste -3 Bodega, +2 Almacén, +1 Bodega
+
+caso('Kardex con el contrato del frontend: historial cronológico con saldos, usuario y origen (SCRUM-39)', async () => {
+    const { status, body } = await kardex(ref.ajuste);
+    assert.equal(status, 200);
+    const m = body.movimientos;
+    assert.deepEqual(m.map((x) => x.tipo_movimiento), ['ENTRADA_COMPRA', 'AJUSTE_NEGATIVO', 'AJUSTE_POSITIVO', 'AJUSTE_POSITIVO']);
+    for (const campo of ['id_movimiento', 'fecha_movimiento', 'entrada_bodega', 'salida_bodega', 'entrada_almacen', 'salida_almacen',
+        'saldo_bodega', 'saldo_almacen', 'saldo_total', 'costo_unitario', 'costo_promedio', 'saldo_valorizado', 'saldo_coincide',
+        'documento_referencia', 'motivo', 'nombre_usuario', 'id_venta', 'id_pedido']) {
+        assert.ok(m[0][campo] !== undefined, `falta ${campo}`);
+    }
+    assert.deepEqual(m.map((x) => `${Number(x.saldo_bodega)}/${Number(x.saldo_almacen)}`), ['10/0', '7/0', '7/2', '8/2']);
+    assert.ok(m.every((x) => x.saldo_coincide === true));
+    assert.ok(m.every((x, i) => i === 0 || new Date(x.fecha_movimiento) >= new Date(m[i - 1].fecha_movimiento)));
+    assert.equal(m[0].nombre_usuario, 'Encargado Inventario');
+    assert.equal(m[0].id_venta, null);
+    assert.equal(m[1].motivo, '3 unidades llegaron con la caja rota');
+    assert.equal(Number(m[1].salida_bodega), 3);
+    assert.equal(Number(m[2].entrada_almacen), 2);
+    assert.equal(body.producto.consistente, true);
+    assert.equal(Number(body.producto.stock_total), 10);
+});
+
+caso('Kardex: filtros desde/hasta (inclusivos, hora de Colombia) sin alterar los saldos', async () => {
+    const hoy = diaColombia();
+    const conHoy = await kardex(ref.ajuste, `?desde=${hoy}&hasta=${hoy}`);
+    assert.equal(conHoy.status, 200);
+    assert.equal(conHoy.body.movimientos.length, 4);
+    assert.equal((await kardex(ref.ajuste, `?desde=${diaColombia(1)}`)).body.movimientos.length, 0);
+    assert.equal((await kardex(ref.ajuste, `?hasta=${diaColombia(-1)}`)).body.movimientos.length, 0);
+    // Filtrando desde el segundo movimiento, el primer saldo mostrado sigue siendo el real (7/0)
+    const segundo = (await kardex(ref.ajuste)).body.movimientos[1].fecha_movimiento;
+    const parcial = await kardex(ref.ajuste, `?desde=${encodeURIComponent(segundo)}`);
+    assert.equal(Number(parcial.body.movimientos[0].saldo_bodega), 7);
+});
+
+caso('Kardex: 400 con id o fechas inválidas, 404 si el producto no existe', async () => {
+    assert.equal((await kardex('abc')).status, 400);
+    for (const q of ['?desde=ayer', '?hasta=2026-02-30', '?desde=2026-13-01', `?desde=${diaColombia(1)}&hasta=${diaColombia()}`]) {
+        assert.equal((await kardex(ref.ajuste, q)).status, 400, q);
+    }
+    const r = await kardex(99999999);
+    assert.equal(r.status, 404);
+    assert.ok(r.body.message);
+});
+
+caso('Kardex: roles INVENTARIO, ADMIN y GERENTE; el Vendedor no ve costos', async () => {
+    assert.equal((await kardex(ref.ajuste, '', null)).status, 401);
+    assert.equal((await kardex(ref.ajuste, '', await iniciarSesion(PORT, 'gerente@simo.local'))).status, 200);
+    assert.equal((await kardex(ref.ajuste, '', await iniciarSesion(PORT, 'vendedor@simo.local'))).status, 403);
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18

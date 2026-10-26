@@ -106,8 +106,46 @@ async function registrarAjuste({ idProducto, tipo, ubicacion, cantidad, motivo, 
     return rows[0];
 }
 
+// SCRUM-43: Kardex de un producto en orden cronológico. Las filas salen de
+// fn_kardex_producto (saldos y costo promedio recalculados, migración 012) y
+// se completan con el nombre de quien registró y la venta, pedido o compra de
+// origen, que la función no devuelve.
+async function obtenerKardex(idProducto, desde, hasta) {
+    const { rows } = await pool.query(
+        `SELECT k.id_movimiento, k.fecha_movimiento, k.tipo_movimiento,
+                k.entrada_bodega, k.salida_bodega, k.entrada_almacen, k.salida_almacen,
+                k.saldo_bodega, k.saldo_almacen, k.saldo_total,
+                k.costo_unitario, k.costo_promedio, k.saldo_valorizado, k.saldo_coincide,
+                k.documento_referencia, k.motivo,
+                k.id_usuario, u.nombre_completo AS nombre_usuario,
+                m.id_venta, m.id_pedido, m.id_compra
+         FROM fn_kardex_producto($1, $2, $3) k
+         JOIN movimientos_inventario m ON m.id_movimiento = k.id_movimiento
+         LEFT JOIN usuarios u ON u.id_usuario = k.id_usuario
+         ORDER BY k.fecha_movimiento, k.id_movimiento`,
+        [idProducto, desde, hasta]
+    );
+    return rows;
+}
+
+async function resumenProductoKardex(idProducto) {
+    const { rows } = await pool.query(
+        `SELECT p.id_producto, p.sku, p.nombre, u.abreviatura AS unidad,
+                p.stock_bodega, p.stock_almacen, p.stock_total,
+                v.valor_inventario, v.consistente
+         FROM productos p
+         JOIN unidades_medida u ON u.id_unidad = p.id_unidad
+         CROSS JOIN LATERAL fn_validar_kardex(p.id_producto) v
+         WHERE p.id_producto = $1`,
+        [idProducto]
+    );
+    return rows[0] || null;
+}
+
 module.exports = {
     buscarProductoPorSku,
+    obtenerKardex,
+    resumenProductoKardex,
     registrarAjuste,
     registrarIngresoBodega,
     registrarCompra,

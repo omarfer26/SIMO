@@ -242,6 +242,27 @@ Responde `201`:
 - La función `fn_registrar_ajuste` (migración 014) bloquea el producto, cambia el stock, deja el movimiento en el Kardex y el registro `AJUSTE_INVENTARIO` en `log_auditoria`, todo o nada.
 - Errores: `400` dato inválido o motivo vacío, `404` producto inexistente, `409` stock insuficiente en esa ubicación o producto inactivo.
 
+### 📒 Kardex de un producto (SCRUM-43)
+
+> Protegido con JWT; roles `INVENTARIO` / `ADMIN` / `GERENTE` (el Vendedor no ve costos). Contrato de la tabla del frontend (SCRUM-39).
+
+`GET /api/inventory/kardex/:id_producto` devuelve el historial **completo y en orden cronológico**, con los saldos y la valorización que recalcula `fn_kardex_producto` (migración 012):
+
+```json
+{ "producto": { "id_producto": 1, "sku": "ELEC-001", "nombre": "...", "unidad": "und", "stock_bodega": "8.000", "stock_almacen": "4.000",
+                "stock_total": "12.000", "valor_inventario": "717619.20", "consistente": true },
+  "movimientos": [ { "id_movimiento": 101, "fecha_movimiento": "...", "tipo_movimiento": "SALIDA_VENTA",
+                     "entrada_bodega": "0", "salida_bodega": "0", "entrada_almacen": "0", "salida_almacen": "3.000",
+                     "saldo_bodega": "8.000", "saldo_almacen": "4.000", "saldo_total": "12.000",
+                     "costo_unitario": "59801.60", "costo_promedio": "59801.60", "saldo_valorizado": "717619.20",
+                     "saldo_coincide": true, "documento_referencia": null, "motivo": null,
+                     "id_usuario": 4, "nombre_usuario": "Vendedor SIMO", "id_venta": 1112, "id_pedido": null, "id_compra": null } ] }
+```
+
+- Filtros opcionales `?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (inclusivos, hora de Colombia) o fecha y hora ISO 8601. Filtrar no cambia los saldos: siempre se calculan desde el primer movimiento.
+- `saldo_coincide: false` marca un movimiento cuyo saldo guardado no cuadra; `producto.consistente` resume la auditoría del producto.
+- Errores: `400` id o fechas inválidas, `404` producto inexistente.
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).

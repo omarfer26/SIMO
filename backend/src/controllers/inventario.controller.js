@@ -8,6 +8,8 @@ const {
     existenProductos,
     idsPorSku,
     registrarAjuste,
+    obtenerKardex,
+    resumenProductoKardex,
 } = require('../repositories/inventario.repository');
 
 const REGEX_ENTERO_POSITIVO = /^[1-9]\d*$/;
@@ -345,4 +347,60 @@ async function postAjuste(req, res) {
     }
 }
 
-module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste };
+// =====================================================================
+// GET /api/inventory/kardex/:id_producto (SCRUM-43, contrato del frontend SCRUM-39)
+// Query opcional: desde, hasta (AAAA-MM-DD, inclusivos, hora de Colombia, o
+// fecha y hora ISO 8601). Sin filtros devuelve el historial completo.
+// Los saldos no cambian al filtrar: se calculan desde el primer movimiento.
+// =====================================================================
+const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
+// Convierte el parámetro a un instante; las fechas sin hora se toman en hora
+// de Colombia (UTC-5) al inicio o al final del día.
+function aInstante(valor, finDelDia) {
+    if (valor === undefined || valor === '') return null;
+    if (typeof valor !== 'string') return undefined;
+    if (REGEX_FECHA.test(valor)) {
+        // Rechaza días que no existen (2026-02-30), que Date convertiría al mes siguiente
+        const [a, m, d] = valor.split('-').map(Number);
+        const calendario = new Date(Date.UTC(a, m - 1, d));
+        if (calendario.getUTCFullYear() !== a || calendario.getUTCMonth() !== m - 1 || calendario.getUTCDate() !== d) {
+            return undefined;
+        }
+        return new Date(`${valor}T${finDelDia ? '23:59:59.999' : '00:00:00.000'}-05:00`);
+    }
+    const d = new Date(valor);
+    return /^\d{4}-\d{2}-\d{2}T/.test(valor) && !Number.isNaN(d.getTime()) ? d : undefined;
+}
+
+async function getKardex(req, res) {
+    try {
+        const { id_producto } = req.params;
+        if (!REGEX_ENTERO_POSITIVO.test(String(id_producto))) {
+            return badRequest(res, 'El id_producto debe ser un entero positivo.');
+        }
+        const desde = aInstante(req.query.desde, false);
+        const hasta = aInstante(req.query.hasta, true);
+        if (desde === undefined || hasta === undefined) {
+            return badRequest(res, 'Los filtros desde y hasta deben tener formato AAAA-MM-DD o fecha y hora ISO 8601.');
+        }
+        if (desde && hasta && desde > hasta) {
+            return badRequest(res, 'La fecha desde no puede ser posterior a hasta.');
+        }
+
+        const producto = await resumenProductoKardex(Number(id_producto));
+        if (!producto) {
+            return res.status(404).json({ error: 'Not Found', message: `El producto ${id_producto} no existe.` });
+        }
+        const movimientos = await obtenerKardex(Number(id_producto), desde, hasta);
+        return res.status(200).json({ producto, movimientos });
+    } catch (error) {
+        if (error.code === 'SM001') {
+            return res.status(404).json({ error: 'Not Found', message: `${error.message}.` });
+        }
+        console.error('[GET /api/inventory/kardex] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al consultar el Kardex.' });
+    }
+}
+
+module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste, getKardex };
