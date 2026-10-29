@@ -104,9 +104,20 @@ async function listarPedidos({ desde, hasta, estado, idCliente }) {
     return rows;
 }
 
+// SCRUM-61: cambio de estado con su efecto en el stock, todo en la base
+// (fn_cambiar_estado_pedido, migración 016): al pasar a EN_PREPARACION
+// descuenta en cascada; al cancelar devuelve lo descontado.
+async function cambiarEstadoPedido({ idPedido, estado, idUsuario, motivo }) {
+    const { rows } = await pool.query(
+        'SELECT id_pedido, estado FROM fn_cambiar_estado_pedido($1, $2, $3, $4)',
+        [idPedido, estado, idUsuario, motivo]
+    );
+    return rows[0];
+}
+
 async function estadoCliente(idCliente) {
     const { rows } = await pool.query('SELECT estado FROM clientes WHERE id_cliente = $1', [idCliente]);
     return rows[0] ? rows[0].estado : null;
 }
 
-module.exports = { crearPedido, obtenerPedido, listarPedidos, estadoCliente };
+module.exports = { crearPedido, obtenerPedido, listarPedidos, cambiarEstadoPedido, estadoCliente };

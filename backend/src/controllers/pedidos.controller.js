@@ -1,6 +1,6 @@
 // src/controllers/pedidos.controller.js
 // Pedidos de clientes (HU-10, CU-12). SCRUM-81: registro y consulta.
-const { crearPedido, obtenerPedido, listarPedidos, estadoCliente } = require('../repositories/pedidos.repository');
+const { crearPedido, obtenerPedido, listarPedidos, cambiarEstadoPedido, estadoCliente } = require('../repositories/pedidos.repository');
 const { existenProductos, idsPorSku } = require('../repositories/inventario.repository');
 const { aInstante } = require('../utils/fechas');
 const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../utils/numeros');
@@ -11,7 +11,12 @@ const ESTADOS = ['REGISTRADO', 'CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGA
 const ERRORES_PEDIDO = {
     SM002: [409, 'Conflict'],
     SM004: [400, 'Bad Request'],
+    SM015: [400, 'Bad Request'],
     SM017: [409, 'Conflict'],
+    SM018: [404, 'Not Found'],
+    SM019: [409, 'Conflict'],
+    // Transición fuera del ciclo (trigger fn_validar_transicion_pedido, 004)
+    23514: [409, 'Conflict'],
 };
 
 function badRequest(res, message) {
@@ -170,4 +175,61 @@ async function getPedido(req, res) {
     }
 }
 
-module.exports = { postPedido, getPedidos, getPedido };
+// =====================================================================
+// PATCH /api/orders/:id/status (SCRUM-61, contrato del frontend SCRUM-58/125)
+// Body: { estado, motivo? }. El ciclo es REGISTRADO -> CONFIRMADO ->
+// EN_PREPARACION -> LISTO -> ENTREGADO, un paso a la vez; CANCELADO desde
+// cualquier estado antes de ENTREGADO y con motivo obligatorio.
+// Al pasar a EN_PREPARACION se descuenta el stock (Almacén y luego Bodega);
+// al cancelar un pedido que ya descontó, el stock vuelve a su ubicación.
+// =====================================================================
+async function patchEstadoPedido(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
+            return badRequest(res, 'El id del pedido debe ser un entero positivo.');
+        }
+        const estado = typeof req.body?.estado === 'string' ? req.body.estado.trim().toUpperCase() : '';
+        if (!ESTADOS.includes(estado) || estado === 'REGISTRADO') {
+            return badRequest(res, `El estado debe ser uno de: ${ESTADOS.filter((e) => e !== 'REGISTRADO').join(', ')}.`);
+        }
+        const motivo = req.body?.motivo;
+        if (motivo !== undefined && motivo !== null && (typeof motivo !== 'string' || motivo.length > 500)) {
+            return badRequest(res, 'El motivo debe ser un texto de máximo 500 caracteres.');
+        }
+        if (estado === 'CANCELADO' && (typeof motivo !== 'string' || !motivo.trim())) {
+            return badRequest(res, 'Para cancelar un pedido debe indicar el motivo.');
+        }
+
+        const resultado = await cambiarEstadoPedido({
+            idPedido: Number(req.params.id),
+            estado,
+            idUsuario: Number(idUsuario),
+            motivo: typeof motivo === 'string' ? motivo.trim() : null,
+        });
+        const pedido = await obtenerPedido(resultado.id_pedido);
+        const mensajes = {
+            EN_PREPARACION: 'Pedido en preparación: el stock fue descontado',
+            CANCELADO: 'Pedido cancelado',
+        };
+        return res.status(200).json({
+            message: mensajes[estado] || 'Estado del pedido actualizado',
+            id_pedido: pedido.id_pedido,
+            estado: pedido.estado,
+            pedido,
+        });
+    } catch (error) {
+        const negocio = ERRORES_PEDIDO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        console.error('[PATCH /api/orders/:id/status] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al cambiar el estado del pedido.' });
+    }
+}
+
+module.exports = { postPedido, getPedidos, getPedido, patchEstadoPedido };

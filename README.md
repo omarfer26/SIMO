@@ -286,6 +286,22 @@ Consulta:
 - `GET /api/orders/:id` → `{ pedido }` con líneas e historial.
 - Desde `EN_PREPARACION` las líneas del pedido ya no se pueden modificar (lo impide la base de datos).
 
+#### Cambio de estado (SCRUM-61)
+
+`PATCH /api/orders/:id/status` (alias `/estado`), roles `VENDEDOR` / `INVENTARIO` / `GERENTE` / `ADMIN`:
+
+```json
+{ "estado": "EN_PREPARACION" }
+{ "estado": "CANCELADO", "motivo": "El cliente desistió" }
+```
+
+- Ciclo de un paso a la vez: `REGISTRADO → CONFIRMADO → EN_PREPARACION → LISTO → ENTREGADO`; `CANCELADO` desde cualquier estado antes de `ENTREGADO`, **con motivo**.
+- Al pasar a `EN_PREPARACION` se **descuenta el stock** de cada línea: primero del Almacén y luego de Bodega (RN-02), con movimientos `SALIDA_PEDIDO` en el Kardex. Si a una línea no le alcanza, no se descuenta nada y el pedido no avanza.
+- Al cancelar un pedido que ya descontó, cada cantidad vuelve a su ubicación (`REVERSO_PEDIDO`) y la cancelación queda en `log_auditoria`.
+- Responde `200` con `{ message, id_pedido, estado, pedido }` (el frontend lee `estado`).
+- Errores: `400` estado inválido o cancelación sin motivo, `404` pedido inexistente, `409` transición fuera del ciclo o stock insuficiente.
+- Todo ocurre en la función `fn_cambiar_estado_pedido` (migración 016), en una sola transacción.
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).

@@ -20,7 +20,8 @@ db/
 │   ├── 012_saldo_kardex.sql    fn_kardex_producto y fn_validar_kardex (SCRUM-132)
 │   ├── 013_indices_ventas.sql  índices B-tree de cobertura para ventas (SCRUM-133)
 │   ├── 014_ajustes_inventario.sql fn_registrar_ajuste y orden del Kardex con concurrencia (SCRUM-42)
-│   └── 015_pedidos.sql         total y reglas de las líneas de pedido (SCRUM-81)
+│   ├── 015_pedidos.sql         total y reglas de las líneas de pedido (SCRUM-81)
+│   └── 016_estados_pedido.sql  fn_cambiar_estado_pedido: stock al preparar y al cancelar (SCRUM-61)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
@@ -32,7 +33,8 @@ db/
     ├── 003_compras.sql           17 pruebas de compras y sp_confirmar_compra (no deja datos)
     ├── 004_saldo_kardex.sql      12 pruebas del saldo y la valorización del Kardex (no deja datos)
     ├── 005_ajustes.sql           20 pruebas de ajustes manuales y su auditoría (no deja datos)
-    └── 006_pedidos.sql           12 pruebas de las líneas y el total de los pedidos (no deja datos)
+    ├── 006_pedidos.sql           12 pruebas de las líneas y el total de los pedidos (no deja datos)
+    └── 007_estados_pedido.sql    17 pruebas del ciclo de estados con descuento y reverso de stock (no deja datos)
 ```
 
 ## Cómo crear la base

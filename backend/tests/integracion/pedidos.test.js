@@ -34,6 +34,22 @@ async function api(ruta = '', { metodo = 'GET', cuerpo, tokenSesion = token } = 
     return { status: res.status, body: await res.json() };
 }
 const registrar = (cuerpo, tokenSesion) => api('', { metodo: 'POST', cuerpo, tokenSesion });
+const cambiarEstado = (id, cuerpo, tokenSesion) => api(`/${id}/status`, { metodo: 'PATCH', cuerpo, tokenSesion });
+
+async function stock(producto) {
+    const { rows } = await pool.query(
+        'SELECT stock_bodega::float AS bodega, stock_almacen::float AS almacen FROM productos WHERE id_producto = $1',
+        [producto.id_producto]
+    );
+    return rows[0];
+}
+
+// Registra un pedido de un solo producto y devuelve su id
+async function pedidoDe(producto, cantidad) {
+    const { status, body } = await registrar({ ...pedidoValido(), lineas: [{ id_producto: producto.id_producto, cantidad }] });
+    assert.equal(status, 201);
+    return body.pedido.id_pedido;
+}
 
 // Fecha en Colombia (UTC-5), formato AAAA-MM-DD
 const diaColombia = (desplazamientoDias = 0) =>
@@ -63,6 +79,16 @@ async function preparar() {
     ref.und = await crearProducto('U', 'und', 2500);
     ref.kg = await crearProducto('K', 'kg', 4000);
     ref.inactivo = await crearProducto('I', 'und', 2000, false);
+    ref.stock = await crearProducto('S', 'und', 3000);       // SCRUM-61: Bodega 7, Almacén 3
+    ref.disputado = await crearProducto('D', 'und', 1000);   // SCRUM-61: 10 en Bodega, para concurrencia
+    const inventario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
+    await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.stock.id_producto, inventario]);
+    await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.disputado.id_producto, inventario]);
+    await pool.query(
+        `INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, ubicacion_destino, cantidad,
+                                             costo_unitario, saldo_bodega, saldo_almacen, id_usuario)
+         VALUES ($1, 'TRASLADO_INTERNO', 'BODEGA', 'ALMACEN', 3, 1000, 7, 3, $2)`, [ref.stock.id_producto, inventario]);
+    await pool.query('UPDATE productos SET stock_bodega = 7, stock_almacen = 3 WHERE id_producto = $1', [ref.stock.id_producto]);
     ref.vendedor = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'vendedor'`)).rows[0].id_usuario;
 
     servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
@@ -200,6 +226,98 @@ caso('Roles: registra Vendedor/Gerente/Admin; Inventario consulta pero no regist
     assert.equal((await api(`/${ref.pedido}`, { tokenSesion: inventario })).status, 200);
     const gerente = await iniciarSesion(PORT, 'gerente@simo.local');
     assert.equal((await registrar({ ...pedidoValido(), lineas: [{ id_producto: ref.kg.id_producto, cantidad: 2 }] }, gerente)).status, 201);
+});
+
+// ------------------------------ Cambio de estado (SCRUM-61) ------------------------------
+
+caso('Ciclo completo con el contrato del frontend: descuenta stock solo al pasar a EN_PREPARACION', async () => {
+    const id = await pedidoDe(ref.stock, 5);
+    const inventario = await iniciarSesion(PORT, 'inventario@simo.local');
+
+    const confirmado = await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    assert.equal(confirmado.status, 200);
+    assert.equal(confirmado.body.estado, 'CONFIRMADO');           // el front lee data.estado
+    assert.deepEqual(await stock(ref.stock), { bodega: 7, almacen: 3 });
+
+    const preparado = await cambiarEstado(id, { estado: 'en_preparacion' }, inventario);
+    assert.equal(preparado.status, 200);
+    assert.equal(preparado.body.estado, 'EN_PREPARACION');
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 }); // 3 del Almacén y 2 de Bodega
+
+    for (const estado of ['LISTO', 'ENTREGADO']) {
+        assert.equal((await cambiarEstado(id, { estado }, inventario)).status, 200);
+    }
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 });
+    const { body } = await api(`/${id}`);
+    assert.deepEqual(body.pedido.historial.map((h) => h.estado_nuevo), ['REGISTRADO', 'CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO']);
+    assert.equal(body.pedido.historial[2].nombre_usuario, 'Encargado Inventario');
+
+    const { rows } = await pool.query(
+        `SELECT ubicacion_origen, cantidad::float FROM movimientos_inventario
+         WHERE id_pedido = $1 AND tipo_movimiento = 'SALIDA_PEDIDO' ORDER BY id_movimiento`, [id]);
+    assert.deepEqual(rows, [{ ubicacion_origen: 'ALMACEN', cantidad: 3 }, { ubicacion_origen: 'BODEGA', cantidad: 2 }]);
+    ref.entregado = id;
+});
+
+caso('Transiciones inválidas (409) y datos inválidos (400/404)', async () => {
+    const id = await pedidoDe(ref.kg, 1);
+    assert.equal((await cambiarEstado(id, { estado: 'LISTO' })).status, 409);        // salta estados
+    assert.equal((await cambiarEstado(ref.entregado, { estado: 'CONFIRMADO' })).status, 409);
+    assert.equal((await cambiarEstado(ref.entregado, { estado: 'CANCELADO', motivo: 'tarde' })).status, 409);
+    for (const cuerpo of [{}, { estado: 'PERDIDO' }, { estado: 'REGISTRADO' }, { estado: 5 }, { estado: 'CONFIRMADO', motivo: 7 }]) {
+        assert.equal((await cambiarEstado(id, cuerpo)).status, 400, JSON.stringify(cuerpo));
+    }
+    assert.equal((await cambiarEstado(99999999, { estado: 'CONFIRMADO' })).status, 404);
+    assert.equal((await api('/abc/status', { metodo: 'PATCH', cuerpo: { estado: 'CONFIRMADO' } })).status, 400);
+    const r = await cambiarEstado(id, { estado: 'LISTO' });
+    assert.match(r.body.message, /secuencial/);
+});
+
+caso('Cancelar exige motivo y devuelve el stock a su ubicación', async () => {
+    const id = await pedidoDe(ref.stock, 4);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    assert.equal((await cambiarEstado(id, { estado: 'EN_PREPARACION' })).status, 200);
+    assert.deepEqual(await stock(ref.stock), { bodega: 1, almacen: 0 });
+
+    const sinMotivo = await cambiarEstado(id, { estado: 'CANCELADO' });
+    assert.equal(sinMotivo.status, 400);
+    assert.match(sinMotivo.body.message, /motivo/);
+    const cancelado = await cambiarEstado(id, { estado: 'CANCELADO', motivo: 'El cliente desistió' });
+    assert.equal(cancelado.status, 200);
+    assert.equal(cancelado.body.estado, 'CANCELADO');
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 });
+    const { body } = await api(`/${id}`);
+    assert.equal(body.pedido.historial.at(-1).motivo, 'El cliente desistió');
+    const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.stock.id_producto]);
+    assert.equal(rows[0].consistente, true);
+});
+
+caso('Sin stock suficiente responde 409 y el pedido no avanza', async () => {
+    const id = await pedidoDe(ref.stock, 6);   // hay 5
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    const r = await cambiarEstado(id, { estado: 'EN_PREPARACION' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /Stock insuficiente/);
+    assert.equal((await api(`/${id}`)).body.pedido.estado, 'CONFIRMADO');
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 });
+});
+
+caso('Dos pedidos que se preparan a la vez por el mismo stock: solo uno lo obtiene', async () => {
+    const a = await pedidoDe(ref.disputado, 6);
+    const b = await pedidoDe(ref.disputado, 6);    // hay 10: no alcanzan los dos
+    await cambiarEstado(a, { estado: 'CONFIRMADO' });
+    await cambiarEstado(b, { estado: 'CONFIRMADO' });
+    const respuestas = await Promise.all([a, b].map((id) => cambiarEstado(id, { estado: 'EN_PREPARACION' })));
+    assert.deepEqual(respuestas.map((r) => r.status).sort(), [200, 409]);
+    assert.deepEqual(await stock(ref.disputado), { bodega: 4, almacen: 0 });
+    const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.disputado.id_producto]);
+    assert.equal(rows[0].consistente, true);
+});
+
+caso('Cambio de estado: exige sesión; /estado es alias', async () => {
+    const id = await pedidoDe(ref.kg, 1);
+    assert.equal((await cambiarEstado(id, { estado: 'CONFIRMADO' }, null)).status, 401);
+    assert.equal((await api(`/${id}/estado`, { metodo: 'PATCH', cuerpo: { estado: 'CONFIRMADO' } })).status, 200);
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18

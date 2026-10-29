@@ -3,8 +3,7 @@
 -- Función: fn_cambiar_estado_pedido
 -- Requisitos: RF-18, RN-02, RN-04 | CU-12, CU-13 | HU-10, HU-11
 --
--- EN DESARROLLO (rama feature/SCRUM-61-estados-pedido): falta el endpoint
--- PATCH /api/orders/:id/status y sus pruebas de integración.
+-- La usa PATCH /api/orders/:id/status (src/controllers/pedidos.controller.js).
 --
 -- El ciclo REGISTRADO -> CONFIRMADO -> EN_PREPARACION -> LISTO -> ENTREGADO
 -- ya lo valida el trigger de 004. Esta función agrega el efecto en el stock,
