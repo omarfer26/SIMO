@@ -19,9 +19,28 @@
 // Por ahora el front pide todo y filtra en el navegador (así el filtro es
 // instantáneo). Cuando haya muchos pedidos, se mandan desde/hasta.
 
+//
+// SCRUM-57 (Camilo) — Se agregó registrarPedido() para el formulario "Nuevo
+// pedido". Usa el MISMO interruptor NEXT_PUBLIC_PEDIDOS_MOCK que la lista,
+// para que un pedido creado en el mock aparezca en la lista del mock (y uno
+// creado en la API, en la lista de la API).
+// CONTRATO (el que ya implementó Ramón en la rama back-end, SCRUM-81):
+//   POST /api/orders   (roles VENDEDOR, GERENTE y ADMIN)
+//   Recibe: { id_cliente, fecha_entrega_pactada: "AAAA-MM-DD",
+//             direccion_entrega?, observaciones?,
+//             lineas: [{ id_producto, cantidad }] }
+//     - quien registra sale del token; el precio de cada línea es el precio
+//       de venta vigente del producto (lo pone la base, no el front).
+//   Responde 201: { message, pedido, advertencia? }
+//     - pedido trae los mismos campos que una fila de GET /api/orders.
+//     - advertencia: si hoy no alcanza el stock de algún producto. No
+//       impide registrar (el stock se descuenta en EN_PREPARACION).
+//   Errores: 400 dato inválido · 404 cliente o producto no existe ·
+//            409 el cliente está inactivo.
+
 import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
-import type { EstadoPedido, Pedido } from "./tipos";
+import type { DatosPedidoNuevo, EstadoPedido, Pedido, PedidoRegistrado } from "./tipos";
 
 const USAR_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK !== "false";
 
@@ -69,6 +88,62 @@ export async function actualizarEstadoPedido(
     id: idPedido,
     estado: data.estado || nuevoEstado,
   };
+}
+
+type TipoErrorRegistro = "datos_invalidos" | "no_existe" | "conflicto" | "sin_conexion" | "servidor";
+
+export class ErrorRegistroPedido extends Error {
+  tipo: TipoErrorRegistro;
+
+  constructor(tipo: TipoErrorRegistro, mensaje: string) {
+    super(mensaje);
+    this.name = "ErrorRegistroPedido";
+    this.tipo = tipo;
+  }
+}
+
+// SCRUM-57 (Camilo) — Registra un pedido nuevo (nace REGISTRADO).
+export async function registrarPedido(datos: DatosPedidoNuevo): Promise<PedidoRegistrado> {
+  if (USAR_MOCK) return registrarPedidoMock(datos);
+
+  try {
+    const { data } = await apiClient.post("/orders", {
+      id_cliente: datos.idCliente,
+      fecha_entrega_pactada: datos.fechaEntregaPactada,
+      direccion_entrega: datos.direccionEntrega.trim() || undefined,
+      observaciones: datos.observaciones.trim() || undefined,
+      lineas: datos.lineas.map((l) => ({ id_producto: l.idProducto, cantidad: l.cantidad })),
+    });
+    return {
+      pedido: aPedido(data.pedido as FilaPedido),
+      advertencia: typeof data.advertencia === "string" ? data.advertencia : null,
+    };
+  } catch (error) {
+    if (!isAxiosError(error)) throw new ErrorRegistroPedido("servidor", "Error inesperado.");
+    if (!error.response) throw new ErrorRegistroPedido("sin_conexion", error.message);
+    const mensaje: unknown = error.response.data?.message;
+    const texto = typeof mensaje === "string" ? mensaje : error.message;
+    if (error.response.status === 400) throw new ErrorRegistroPedido("datos_invalidos", texto);
+    if (error.response.status === 404) throw new ErrorRegistroPedido("no_existe", texto);
+    if (error.response.status === 409) throw new ErrorRegistroPedido("conflicto", texto);
+    throw new ErrorRegistroPedido("servidor", texto);
+  }
+}
+
+export function mensajeErrorRegistro(error: unknown): string {
+  if (!(error instanceof ErrorRegistroPedido)) return "Ocurrió un error inesperado. Inténtalo de nuevo.";
+  switch (error.tipo) {
+    case "datos_invalidos":
+      return error.message || "Hay datos inválidos en el pedido. Revísalos.";
+    case "no_existe":
+      return `${error.message || "El cliente o un producto ya no existe."} Recarga la página y revisa.`;
+    case "conflicto":
+      return error.message || "El cliente está inactivo: no se le pueden registrar pedidos.";
+    case "sin_conexion":
+      return "No pudimos conectar con el servidor. El pedido NO se registró; inténtalo de nuevo.";
+    case "servidor":
+      return "El servidor tuvo un problema. El pedido NO se registró; inténtalo de nuevo.";
+  }
 }
 
 export function mensajeErrorPedidos(error: unknown): string {
@@ -182,4 +257,29 @@ async function actualizarEstadoPedidoMock(
   pedidos[indice].estado = nuevoEstado;
   guardarPedidosMemoria(pedidos);
   return { id: idPedido, estado: nuevoEstado };
+}
+
+// SCRUM-57 (Camilo) — Mock del registro: lo agrega a los pedidos guardados en
+// este navegador, con el número siguiente, y avisa si no alcanza el stock
+// (el formulario ya lo sabe, así que el mock no repite esa cuenta).
+async function registrarPedidoMock(datos: DatosPedidoNuevo): Promise<PedidoRegistrado> {
+  await esperar(700);
+  const pedidos = obtenerPedidosMemoria();
+  const total = datos.lineas.reduce(
+    (suma, l) => suma + Math.round(l.cantidad * l.precioUnitario * 100) / 100,
+    0,
+  );
+  // Igual que el backend: se pacta para el final del día elegido.
+  const [anio, mes, dia] = datos.fechaEntregaPactada.split("-").map(Number);
+  const pedido: Pedido = {
+    id: pedidos.reduce((mayor, p) => Math.max(mayor, p.id), 1000) + 1,
+    cliente: datos.nombreCliente,
+    registradoPor: "Tú (sesión actual)",
+    estado: "REGISTRADO",
+    fechaSolicitud: new Date(),
+    fechaEntregaPactada: new Date(anio, mes - 1, dia, 23, 59, 59),
+    total,
+  };
+  guardarPedidosMemoria([...pedidos, pedido]);
+  return { pedido, advertencia: null };
 }

@@ -12,8 +12,15 @@
 //  - Mientras carga se ven cuadros grises; si falla, el error con un botón
 //    para reintentar; si ningún pedido cae en el rango, un mensaje con el
 //    botón "Limpiar filtro".
+//
+// SCRUM-57 (Camilo) — Botón "+ Nuevo pedido" que abre el modal con el
+// formulario de registro (components/pedidos/FormularioPedido.tsx). Al
+// registrarlo, el pedido aparece de una vez en el tablero y en la tabla como
+// "Registrado". No se le muestra al Encargado de Inventario: el backend solo
+// deja registrar pedidos a Vendedor, Gerente y Administrador.
 
 import { useEffect, useState } from "react";
+import FormularioPedido from "@/components/pedidos/FormularioPedido";
 import FiltroFechasPedidos, {
   RANGO_VACIO,
   filtrarPorFechas,
@@ -27,6 +34,7 @@ import Button from "@/components/ui/Button";
 import DataTable, { type ColumnaTabla } from "@/components/ui/DataTable";
 import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { leerRol } from "@/lib/auth/sesion";
 import {
   actualizarEstadoPedido,
   listarPedidos,
@@ -37,6 +45,7 @@ import {
   TRANSICIONES_VALIDAS,
   type EstadoPedido,
   type Pedido,
+  type PedidoRegistrado,
 } from "@/lib/pedidos/tipos";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
@@ -104,6 +113,14 @@ export default function PedidosPage() {
   const [vista, setVista] = useState<"tablero" | "tabla">("tablero");
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null);
   const [avisoExito, setAvisoExito] = useState<string | null>(null);
+  // SCRUM-57 — Cuántas veces se ha abierto "Nuevo pedido". Va como `key` del
+  // formulario para que cada vez arranque vacío; 0 = cerrado.
+  const [nuevoPedido, setNuevoPedido] = useState(0);
+  const [modalNuevoAbierto, setModalNuevoAbierto] = useState(false);
+
+  // Solo se lee cuando la lista ya llegó (en el navegador), porque el rol
+  // está en una cookie. Inventario recibiría un 403, que cierra la sesión.
+  const puedeRegistrar = lista.tipo === "lista" && leerRol() !== "INVENTARIO";
 
   const pedidosFiltrados =
     lista.tipo === "lista" ? filtrarPorFechas(lista.pedidos, rango) : [];
@@ -146,6 +163,20 @@ export default function PedidosPage() {
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Error al actualizar el estado del pedido.");
     }
+  };
+
+  // SCRUM-57 — El pedido recién registrado entra a la lista sin recargarla.
+  const manejarPedidoRegistrado = ({ pedido, advertencia }: PedidoRegistrado) => {
+    setLista((prev) =>
+      prev.tipo === "lista" ? { ...prev, pedidos: [pedido, ...prev.pedidos] } : prev,
+    );
+    // Si el filtro de fechas lo dejaría por fuera, se limpia para que se vea.
+    if (filtrarPorFechas([pedido], rango).length === 0) setRango(RANGO_VACIO);
+    setModalNuevoAbierto(false);
+    setAvisoExito(
+      `Pedido #${pedido.id} registrado para ${pedido.cliente}.${advertencia ? ` Ojo: ${advertencia}` : ""}`,
+    );
+    setTimeout(() => setAvisoExito(null), advertencia ? 8000 : 4000);
   };
 
   const columnas: ColumnaTabla<Pedido>[] = [
@@ -244,8 +275,9 @@ export default function PedidosPage() {
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
         {/* Selector de Vista: Tablero Kanban o Lista en Tabla */}
-        <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800 self-start sm:self-auto">
+        <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
           <button
             type="button"
             onClick={() => setVista("tablero")}
@@ -274,6 +306,22 @@ export default function PedidosPage() {
             </svg>
             Tabla Detallada
           </button>
+        </div>
+
+        {/* SCRUM-57 — Abre el formulario de registro */}
+        {puedeRegistrar && (
+          <Button
+            onClick={() => {
+              setNuevoPedido((n) => n + 1);
+              setModalNuevoAbierto(true);
+            }}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Nuevo pedido
+          </Button>
+        )}
         </div>
       </div>
 
@@ -343,6 +391,22 @@ export default function PedidosPage() {
           </div>
         )}
       </div>
+
+      {/* SCRUM-57 — Modal "Nuevo pedido". Un clic afuera no lo cierra, para
+          no perder lo que ya se llenó por accidente. */}
+      <Modal
+        isOpen={modalNuevoAbierto}
+        onClose={() => setModalNuevoAbierto(false)}
+        title="Nuevo pedido"
+        maxWidth="3xl"
+        closeOnBackdropClick={false}
+      >
+        <FormularioPedido
+          key={nuevoPedido}
+          onRegistrado={manejarPedidoRegistrado}
+          onCancelar={() => setModalNuevoAbierto(false)}
+        />
+      </Modal>
 
       {/* Modal con la Línea de Tiempo Interactiva del Pedido Seleccionado */}
       <Modal

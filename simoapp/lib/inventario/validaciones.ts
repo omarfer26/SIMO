@@ -55,7 +55,8 @@ export function validarTraslado(
 // SCRUM-38 (Camilo) — Revisión de cantidad que antes estaba dentro de
 // validarTraslado; ahora la comparten el traslado y el ajuste. `maximo` es
 // lo que hay en la ubicación de donde sale la mercancía (si sale de algún lado).
-function errorCantidad(
+// SCRUM-57 (Camilo) — Exportada: también la usan las líneas de un pedido nuevo.
+export function errorCantidad(
   texto: string,
   unidadMedida: string,
   verbo: string,
