@@ -320,6 +320,80 @@ caso('Cambio de estado: exige sesión; /estado es alias', async () => {
     assert.equal((await api(`/${id}/estado`, { metodo: 'PATCH', cuerpo: { estado: 'CONFIRMADO' } })).status, 200);
 });
 
+// ------------------------------ Pedido a venta (SCRUM-62) ------------------------------
+
+const convertir = (id, cuerpo, tokenSesion, ruta = 'convert-to-sale') =>
+    api(`/${id}/${ruta}`, { metodo: 'POST', cuerpo, tokenSesion });
+
+async function entregar(id) {
+    for (const estado of ['CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO']) {
+        assert.equal((await cambiarEstado(id, { estado })).status, 200, estado);
+    }
+}
+
+caso('Convierte el pedido entregado en venta con sus líneas, sin mover stock', async () => {
+    const antes = await stock(ref.stock);
+    const movimientos = async () => (await pool.query('SELECT count(*)::int AS n FROM movimientos_inventario WHERE id_producto = $1', [ref.stock.id_producto])).rows[0].n;
+    const movsAntes = await movimientos();
+
+    const { status, body } = await convertir(ref.entregado, { metodo_pago: 'nequi', descuento: 1000 });
+    assert.equal(status, 201);
+    const v = body.venta;
+    assert.equal(v.id_pedido, ref.entregado);
+    assert.equal(v.id_cliente, ref.cliente);
+    assert.equal(v.metodo_pago, 'NEQUI');
+    assert.equal(v.nombre_usuario, 'Vendedor SIMO');
+    assert.equal(Number(v.subtotal), 5 * 3000);
+    assert.equal(Number(v.descuento), 1000);
+    assert.equal(Number(v.impuestos), 0);
+    assert.equal(Number(v.total), 14000);
+    assert.equal(v.estado, 'COMPLETADA');
+    assert.deepEqual(v.lineas.map((l) => [l.id_producto, Number(l.cantidad), Number(l.subtotal_linea)]), [[ref.stock.id_producto, 5, 15000]]);
+    assert.ok(v.lineas.every((l) => l.costo_unitario === undefined), 'no expone el costo');
+
+    assert.deepEqual(await stock(ref.stock), antes);
+    assert.equal(await movimientos(), movsAntes);
+    const pedido = (await api(`/${ref.entregado}`)).body.pedido;
+    assert.equal(pedido.id_venta, v.id_venta);
+    assert.ok((await api(`?id_cliente=${ref.cliente}&estado=ENTREGADO`)).body.data.some((p) => p.id_venta === v.id_venta));
+});
+
+caso('Conversión: 409 si ya se convirtió o no está entregado; 400/404 con datos inválidos', async () => {
+    assert.equal((await convertir(ref.entregado, { metodo_pago: 'EFECTIVO' })).status, 409);
+    const abierto = await pedidoDe(ref.kg, 1);
+    const r = await convertir(abierto, { metodo_pago: 'EFECTIVO' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /ENTREGADO/);
+    assert.equal((await convertir(99999999, { metodo_pago: 'EFECTIVO' })).status, 404);
+
+    const id = await pedidoDe(ref.disputado, 1);
+    await entregar(id);
+    for (const cuerpo of [{}, { metodo_pago: 'BITCOIN' }, { id_metodo_pago: 99999 }, { id_metodo_pago: 'x' },
+        { metodo_pago: 'EFECTIVO', descuento: -1 }, { metodo_pago: 'EFECTIVO', descuento: 'abc' },
+        { metodo_pago: 'EFECTIVO', descuento: 1.234 }, { metodo_pago: 'EFECTIVO', descuento: 1001 }]) {
+        assert.equal((await convertir(id, cuerpo)).status, 400, JSON.stringify(cuerpo));
+    }
+    assert.equal((await convertir('abc', { metodo_pago: 'EFECTIVO' })).status, 400);
+    ref.entregadoSinVenta = id;
+});
+
+caso('Dos conversiones simultáneas del mismo pedido: una sola venta', async () => {
+    const respuestas = await Promise.all([1, 2].map(() => convertir(ref.entregadoSinVenta, { metodo_pago: 'EFECTIVO' })));
+    assert.deepEqual(respuestas.map((r) => r.status).sort(), [201, 409]);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM ventas WHERE id_pedido = $1', [ref.entregadoSinVenta]);
+    assert.equal(rows[0].n, 1);
+});
+
+caso('Conversión: roles VENDEDOR, GERENTE y ADMIN; /convertir-venta es alias', async () => {
+    const id = await pedidoDe(ref.disputado, 1);
+    await entregar(id);
+    assert.equal((await convertir(id, { metodo_pago: 'EFECTIVO' }, null)).status, 401);
+    assert.equal((await convertir(id, { metodo_pago: 'EFECTIVO' }, await iniciarSesion(PORT, 'inventario@simo.local'))).status, 403);
+    const r = await convertir(id, { id_metodo_pago: 1 }, await iniciarSesion(PORT, 'gerente@simo.local'), 'convertir-venta');
+    assert.equal(r.status, 201);
+    assert.equal(r.body.venta.nombre_usuario, 'Gerente SIMO');
+});
+
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18
 // (before/after de node:test solo existen desde 18.8).
 test('Pedidos (SCRUM-81 / HU-10)', async (t) => {

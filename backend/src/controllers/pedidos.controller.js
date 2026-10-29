@@ -1,6 +1,15 @@
 // src/controllers/pedidos.controller.js
 // Pedidos de clientes (HU-10, CU-12). SCRUM-81: registro y consulta.
-const { crearPedido, obtenerPedido, listarPedidos, cambiarEstadoPedido, estadoCliente } = require('../repositories/pedidos.repository');
+const {
+    crearPedido,
+    obtenerPedido,
+    listarPedidos,
+    cambiarEstadoPedido,
+    convertirEnVenta,
+    buscarMetodoPago,
+    obtenerVentaDePedido,
+    estadoCliente,
+} = require('../repositories/pedidos.repository');
 const { existenProductos, idsPorSku } = require('../repositories/inventario.repository');
 const { aInstante } = require('../utils/fechas');
 const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../utils/numeros');
@@ -15,6 +24,10 @@ const ERRORES_PEDIDO = {
     SM017: [409, 'Conflict'],
     SM018: [404, 'Not Found'],
     SM019: [409, 'Conflict'],
+    SM020: [409, 'Conflict'],
+    SM021: [409, 'Conflict'],
+    SM022: [400, 'Bad Request'],
+    SM023: [400, 'Bad Request'],
     // Transición fuera del ciclo (trigger fn_validar_transicion_pedido, 004)
     23514: [409, 'Conflict'],
 };
@@ -232,4 +245,64 @@ async function patchEstadoPedido(req, res) {
     }
 }
 
-module.exports = { postPedido, getPedidos, getPedido, patchEstadoPedido };
+// =====================================================================
+// POST /api/orders/:id/convert-to-sale (SCRUM-62, HU-12)
+// Body: { metodo_pago: "EFECTIVO" | "NEQUI" | ... (o id_metodo_pago), descuento? }
+// Convierte un pedido ENTREGADO en venta con sus mismas líneas. No mueve
+// stock: ya se descontó al preparar el pedido. Precios con IVA incluido
+// (impuestos 0), igual que el POS.
+// =====================================================================
+async function postConvertirEnVenta(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
+            return badRequest(res, 'El id del pedido debe ser un entero positivo.');
+        }
+        const { metodo_pago, id_metodo_pago, descuento } = req.body || {};
+        let metodo = null;
+        if (typeof metodo_pago === 'string' && metodo_pago.trim()) {
+            metodo = await buscarMetodoPago({ codigo: metodo_pago.trim().toUpperCase() });
+        } else if (id_metodo_pago !== undefined && id_metodo_pago !== null) {
+            if (!REGEX_ENTERO_POSITIVO.test(String(id_metodo_pago))) return badRequest(res, 'El id_metodo_pago debe ser un entero positivo.');
+            metodo = await buscarMetodoPago({ id: Number(id_metodo_pago) });
+        } else {
+            return badRequest(res, 'Indique el método de pago (metodo_pago o id_metodo_pago).');
+        }
+        if (!metodo) {
+            return badRequest(res, 'El método de pago no existe o está inactivo.');
+        }
+        let descuentoNumero = 0;
+        if (descuento !== undefined && descuento !== null && descuento !== '') {
+            descuentoNumero = aNumero(descuento);
+            if (Number.isNaN(descuentoNumero) || descuentoNumero < 0 || excedeDecimales(descuentoNumero, 2)) {
+                return badRequest(res, 'El descuento debe ser un número no negativo con máximo 2 decimales.');
+            }
+        }
+
+        const idVenta = await convertirEnVenta({
+            idPedido: Number(req.params.id),
+            idUsuario: Number(idUsuario),
+            idMetodoPago: metodo.id_metodo_pago,
+            descuento: descuentoNumero,
+        });
+        const venta = await obtenerVentaDePedido(idVenta);
+        return res.status(201).json({ message: `Pedido ${req.params.id} convertido en la venta ${idVenta}`, venta });
+    } catch (error) {
+        const negocio = ERRORES_PEDIDO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        // Dos conversiones simultáneas: la segunda choca con ventas.id_pedido UNIQUE
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'Conflict', message: 'El pedido ya se convirtió en venta.' });
+        }
+        console.error('[POST /api/orders/:id/convert-to-sale] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al convertir el pedido en venta.' });
+    }
+}
+
+module.exports = { postPedido, getPedidos, getPedido, patchEstadoPedido, postConvertirEnVenta };

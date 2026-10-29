@@ -302,6 +302,20 @@ Consulta:
 - Errores: `400` estado inválido o cancelación sin motivo, `404` pedido inexistente, `409` transición fuera del ciclo o stock insuficiente.
 - Todo ocurre en la función `fn_cambiar_estado_pedido` (migración 016), en una sola transacción.
 
+#### Pedido entregado a venta (SCRUM-62 / HU-12)
+
+`POST /api/orders/:id/convert-to-sale` (alias `/convertir-venta`), roles `VENDEDOR` / `GERENTE` / `ADMIN`:
+
+```json
+{ "metodo_pago": "NEQUI", "descuento": 1000 }
+```
+
+- Solo para pedidos `ENTREGADO`, una sola vez. La venta toma el cliente y las líneas del pedido y queda enlazada a él.
+- **No mueve stock**: ya se descontó al pasar el pedido a `EN_PREPARACION`.
+- `metodo_pago` es el código (`EFECTIVO`, `NEQUI`, `DAVIPLATA`, `TRANSFERENCIA`, `TARJETA`, `OTRO`); también se acepta `id_metodo_pago`. Precios con IVA incluido: `impuestos = 0`, `total = subtotal − descuento`.
+- Responde `201` con `{ message, venta }` (sin costos). El pedido muestra `id_venta` en `GET /api/orders` y `GET /api/orders/:id`.
+- Errores: `400` método de pago o descuento inválido, `404` pedido inexistente, `409` pedido no entregado o ya convertido.
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).

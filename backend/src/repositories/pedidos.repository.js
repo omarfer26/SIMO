@@ -45,10 +45,11 @@ async function obtenerPedido(idPedido) {
         `SELECT p.id_pedido, p.id_cliente, c.nombre AS nombre_cliente, c.identificacion AS identificacion_cliente,
                 c.telefono AS telefono_cliente, p.id_usuario, u.nombre_completo AS nombre_usuario,
                 p.estado, p.fecha_solicitud, p.fecha_entrega_pactada, p.direccion_entrega, p.observaciones,
-                p.total, ${VENCIDO} AS vencido, p.actualizado_en
+                p.total, ${VENCIDO} AS vencido, p.actualizado_en, v.id_venta
          FROM pedidos p
          JOIN clientes c ON c.id_cliente = p.id_cliente
          JOIN usuarios u ON u.id_usuario = p.id_usuario
+         LEFT JOIN ventas v ON v.id_pedido = p.id_pedido
          WHERE p.id_pedido = $1`,
         [idPedido]
     );
@@ -93,10 +94,12 @@ async function listarPedidos({ desde, hasta, estado, idCliente }) {
     const { rows } = await pool.query(
         `SELECT p.id_pedido, p.id_cliente, c.nombre AS nombre_cliente, p.id_usuario, u.nombre_completo AS nombre_usuario,
                 p.estado, p.fecha_solicitud, p.fecha_entrega_pactada, p.total, ${VENCIDO} AS vencido,
-                (SELECT count(*)::int FROM detalles_pedidos d WHERE d.id_pedido = p.id_pedido) AS cantidad_productos
+                (SELECT count(*)::int FROM detalles_pedidos d WHERE d.id_pedido = p.id_pedido) AS cantidad_productos,
+                v.id_venta
          FROM pedidos p
          JOIN clientes c ON c.id_cliente = p.id_cliente
          JOIN usuarios u ON u.id_usuario = p.id_usuario
+         LEFT JOIN ventas v ON v.id_pedido = p.id_pedido
          ${condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : ''}
          ORDER BY p.fecha_solicitud DESC, p.id_pedido DESC`,
         valores
@@ -115,9 +118,59 @@ async function cambiarEstadoPedido({ idPedido, estado, idUsuario, motivo }) {
     return rows[0];
 }
 
+// SCRUM-62: pedido ENTREGADO -> venta, sin mover stock (fn_convertir_pedido_en_venta, 017)
+async function convertirEnVenta({ idPedido, idUsuario, idMetodoPago, descuento }) {
+    const { rows } = await pool.query(
+        'SELECT id_venta FROM fn_convertir_pedido_en_venta($1, $2, $3, $4)',
+        [idPedido, idUsuario, idMetodoPago, descuento]
+    );
+    return rows[0].id_venta;
+}
+
+// Método de pago activo por código (EFECTIVO, NEQUI, ...) o por id
+async function buscarMetodoPago({ codigo, id }) {
+    const { rows } = await pool.query(
+        `SELECT id_metodo_pago, codigo, nombre FROM metodos_pago
+         WHERE estado AND (id_metodo_pago = $1 OR codigo = $2)`,
+        [id ?? null, codigo ?? null]
+    );
+    return rows[0] || null;
+}
+
+async function obtenerVentaDePedido(idVenta) {
+    const { rows } = await pool.query(
+        `SELECT v.id_venta, v.id_pedido, v.id_cliente, c.nombre AS nombre_cliente, v.id_usuario,
+                u.nombre_completo AS nombre_usuario, v.fecha_venta, mp.codigo AS metodo_pago,
+                mp.nombre AS nombre_metodo_pago, v.subtotal, v.descuento, v.impuestos, v.total, v.estado
+         FROM ventas v
+         JOIN usuarios u ON u.id_usuario = v.id_usuario
+         JOIN metodos_pago mp ON mp.id_metodo_pago = v.id_metodo_pago
+         LEFT JOIN clientes c ON c.id_cliente = v.id_cliente
+         WHERE v.id_venta = $1`,
+        [idVenta]
+    );
+    const lineas = await pool.query(
+        `SELECT d.id_producto, p.sku, p.nombre, d.cantidad, d.precio_unitario, d.subtotal_linea
+         FROM detalles_ventas d JOIN productos p ON p.id_producto = d.id_producto
+         WHERE d.id_venta = $1 ORDER BY d.id_detalle_venta`,
+        [idVenta]
+    );
+    // costo_unitario no se expone: es confidencial para el Vendedor
+    return { ...rows[0], lineas: lineas.rows };
+}
+
 async function estadoCliente(idCliente) {
     const { rows } = await pool.query('SELECT estado FROM clientes WHERE id_cliente = $1', [idCliente]);
     return rows[0] ? rows[0].estado : null;
 }
 
-module.exports = { crearPedido, obtenerPedido, listarPedidos, cambiarEstadoPedido, estadoCliente };
+module.exports = {
+    crearPedido,
+    obtenerPedido,
+    listarPedidos,
+    cambiarEstadoPedido,
+    convertirEnVenta,
+    buscarMetodoPago,
+    obtenerVentaDePedido,
+    estadoCliente,
+};
