@@ -4,6 +4,7 @@
 
 import type { Errores } from "@/lib/auth/validaciones";
 import { errorCantidad } from "@/lib/inventario/validaciones";
+import type { CodigoMetodoPago } from "@/lib/ventas/tipos";
 
 export const MAXIMO_LINEAS = 100;
 export const DIRECCION_MAXIMA = 200;
@@ -70,4 +71,32 @@ export function validarPedido(campos: CamposPedido): ResultadoValidacionPedido {
   }
 
   return { errores, erroresCantidad };
+}
+
+// SCRUM-59 (Camilo) — Validación de "Convertir en venta" (HU-12). Las mismas
+// reglas que revisa el backend (fn_convertir_pedido_en_venta): método de
+// pago obligatorio y descuento entre 0 y el total del pedido. Los mensajes
+// son los del POS (lib/ventas/liquidacion.ts).
+export type CampoConversion = "metodoPago" | "descuento";
+
+export function validarConversion({
+  metodoPago,
+  descuentoTexto,
+  totalPedido,
+}: {
+  metodoPago: CodigoMetodoPago | null;
+  descuentoTexto: string;
+  totalPedido: number;
+}): Errores<CampoConversion> {
+  const errores: Errores<CampoConversion> = {};
+  if (!metodoPago) errores.metodoPago = "Elige cómo pagó el cliente.";
+  if (descuentoTexto.trim() !== "") {
+    const descuento = Number(descuentoTexto);
+    if (!Number.isFinite(descuento) || descuento < 0) {
+      errores.descuento = "El descuento debe ser un valor en pesos, 0 o mayor.";
+    } else if (descuento > totalPedido) {
+      errores.descuento = "El descuento no puede ser mayor que el total del pedido.";
+    }
+  }
+  return errores;
 }

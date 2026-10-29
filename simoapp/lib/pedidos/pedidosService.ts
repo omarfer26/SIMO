@@ -37,10 +37,33 @@
 //       impide registrar (el stock se descuenta en EN_PREPARACION).
 //   Errores: 400 dato inválido · 404 cliente o producto no existe ·
 //            409 el cliente está inactivo.
+//
+// SCRUM-59 (Camilo) — Se agregó convertirPedidoEnVenta(): convierte un pedido
+// ENTREGADO en venta (HU-12). Mismo interruptor NEXT_PUBLIC_PEDIDOS_MOCK.
+// CONTRATO (el que ya implementó Ramón en la rama back-end, SCRUM-62):
+//   POST /api/orders/:id/convert-to-sale   (roles VENDEDOR, GERENTE y ADMIN)
+//   Recibe: { metodo_pago: "EFECTIVO" | "NEQUI" | ..., descuento? }
+//     - la venta toma el cliente, las líneas y los precios del pedido; quien
+//       la registra sale del token. No mueve stock: ya salió al pasar el
+//       pedido a EN_PREPARACION.
+//   Responde 201: { message, venta: { id_venta, id_pedido, metodo_pago,
+//                   nombre_metodo_pago, subtotal, descuento, total, ... } }
+//   Errores: 400 método o descuento inválido · 404 el pedido no existe ·
+//            409 el pedido no está ENTREGADO o ya se convirtió en venta.
+//   GET /api/orders ya trae id_venta en cada fila (null si no hay venta).
 
 import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
-import type { DatosPedidoNuevo, EstadoPedido, Pedido, PedidoRegistrado } from "./tipos";
+import { anexarVentaHistorial, listarVentas } from "@/lib/ventas/anulacionService";
+import { METODOS_PAGO } from "@/lib/ventas/tipos";
+import type {
+  DatosConversionVenta,
+  DatosPedidoNuevo,
+  EstadoPedido,
+  Pedido,
+  PedidoRegistrado,
+  VentaDePedido,
+} from "./tipos";
 
 const USAR_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK !== "false";
 
@@ -53,6 +76,7 @@ interface FilaPedido {
   fecha_entrega_pactada: string;
   // PostgreSQL manda los NUMERIC como texto ("125000.00").
   total: string | number;
+  id_venta?: number | null;
 }
 
 function aPedido(fila: FilaPedido): Pedido {
@@ -64,6 +88,7 @@ function aPedido(fila: FilaPedido): Pedido {
     fechaSolicitud: new Date(fila.fecha_solicitud),
     fechaEntregaPactada: new Date(fila.fecha_entrega_pactada),
     total: Number(fila.total),
+    idVenta: fila.id_venta ?? null,
   };
 }
 
@@ -119,15 +144,22 @@ export async function registrarPedido(datos: DatosPedidoNuevo): Promise<PedidoRe
       advertencia: typeof data.advertencia === "string" ? data.advertencia : null,
     };
   } catch (error) {
-    if (!isAxiosError(error)) throw new ErrorRegistroPedido("servidor", "Error inesperado.");
-    if (!error.response) throw new ErrorRegistroPedido("sin_conexion", error.message);
-    const mensaje: unknown = error.response.data?.message;
-    const texto = typeof mensaje === "string" ? mensaje : error.message;
-    if (error.response.status === 400) throw new ErrorRegistroPedido("datos_invalidos", texto);
-    if (error.response.status === 404) throw new ErrorRegistroPedido("no_existe", texto);
-    if (error.response.status === 409) throw new ErrorRegistroPedido("conflicto", texto);
-    throw new ErrorRegistroPedido("servidor", texto);
+    throw aErrorPedido(error);
   }
+}
+
+// SCRUM-59 (Camilo) — Traduce el error de Axios a un ErrorRegistroPedido. Lo
+// comparten el registro y la conversión en venta: responden los mismos
+// códigos (400, 404, 409).
+function aErrorPedido(error: unknown): ErrorRegistroPedido {
+  if (!isAxiosError(error)) return new ErrorRegistroPedido("servidor", "Error inesperado.");
+  if (!error.response) return new ErrorRegistroPedido("sin_conexion", error.message);
+  const mensaje: unknown = error.response.data?.message;
+  const texto = typeof mensaje === "string" ? mensaje : error.message;
+  if (error.response.status === 400) return new ErrorRegistroPedido("datos_invalidos", texto);
+  if (error.response.status === 404) return new ErrorRegistroPedido("no_existe", texto);
+  if (error.response.status === 409) return new ErrorRegistroPedido("conflicto", texto);
+  return new ErrorRegistroPedido("servidor", texto);
 }
 
 export function mensajeErrorRegistro(error: unknown): string {
@@ -144,6 +176,51 @@ export function mensajeErrorRegistro(error: unknown): string {
     case "servidor":
       return "El servidor tuvo un problema. El pedido NO se registró; inténtalo de nuevo.";
   }
+}
+
+// SCRUM-59 (Camilo) — Convierte un pedido ENTREGADO en venta (HU-12).
+export async function convertirPedidoEnVenta(
+  idPedido: number,
+  datos: DatosConversionVenta,
+): Promise<VentaDePedido> {
+  if (USAR_MOCK) return convertirPedidoEnVentaMock(idPedido, datos);
+
+  try {
+    const { data } = await apiClient.post(`/orders/${idPedido}/convert-to-sale`, {
+      metodo_pago: datos.metodoPago,
+      descuento: datos.descuento > 0 ? datos.descuento : undefined,
+    });
+    return {
+      idVenta: data.venta.id_venta,
+      idPedido,
+      descuento: Number(data.venta.descuento),
+      total: Number(data.venta.total),
+      metodoPago: data.venta.nombre_metodo_pago ?? nombreMetodo(datos.metodoPago),
+    };
+  } catch (error) {
+    throw aErrorPedido(error);
+  }
+}
+
+export function mensajeErrorConversion(error: unknown): string {
+  if (!(error instanceof ErrorRegistroPedido)) return "Ocurrió un error inesperado. Inténtalo de nuevo.";
+  switch (error.tipo) {
+    case "datos_invalidos":
+      return error.message || "El método de pago o el descuento no son válidos. Revísalos.";
+    case "no_existe":
+      return `${error.message || "El pedido ya no existe."} Recarga la página.`;
+    case "conflicto":
+      // "El pedido 1004 ya se convirtió en la venta 9301." o "... no está ENTREGADO".
+      return `${error.message || "El pedido ya no se puede convertir en venta."} Recarga la página para ver cómo quedó.`;
+    case "sin_conexion":
+      return "No pudimos conectar con el servidor. La venta NO se registró; inténtalo de nuevo.";
+    case "servidor":
+      return "El servidor tuvo un problema. La venta NO se registró; inténtalo de nuevo.";
+  }
+}
+
+function nombreMetodo(codigo: DatosConversionVenta["metodoPago"]): string {
+  return METODOS_PAGO.find((m) => m.codigo === codigo)?.nombre ?? codigo;
 }
 
 export function mensajeErrorPedidos(error: unknown): string {
@@ -204,6 +281,8 @@ function obtenerPedidosMemoria(): Pedido[] {
           ...p,
           fechaSolicitud: new Date(p.fechaSolicitud),
           fechaEntregaPactada: new Date(p.fechaEntregaPactada),
+          // Los pedidos guardados antes de SCRUM-59 no tienen este campo.
+          idVenta: p.idVenta ?? null,
         }));
       }
     } catch {
@@ -222,6 +301,7 @@ function obtenerPedidosMemoria(): Pedido[] {
       fechaSolicitud,
       fechaEntregaPactada: masDias(fechaSolicitud, entrega),
       total,
+      idVenta: null,
     };
   });
 }
@@ -279,7 +359,59 @@ async function registrarPedidoMock(datos: DatosPedidoNuevo): Promise<PedidoRegis
     fechaSolicitud: new Date(),
     fechaEntregaPactada: new Date(anio, mes - 1, dia, 23, 59, 59),
     total,
+    idVenta: null,
   };
   guardarPedidosMemoria([...pedidos, pedido]);
   return { pedido, advertencia: null };
+}
+
+// SCRUM-59 (Camilo) — Mock de la conversión: aplica las mismas reglas que
+// fn_convertir_pedido_en_venta (migración 017) y deja la venta en el historial
+// de ventas de este navegador, para verla en /ventas. Los pedidos de prueba
+// no guardan sus productos, así que esa venta sale sin artículos en el detalle.
+async function convertirPedidoEnVentaMock(
+  idPedido: number,
+  datos: DatosConversionVenta,
+): Promise<VentaDePedido> {
+  await esperar(700);
+  const pedidos = obtenerPedidosMemoria();
+  const pedido = pedidos.find((p) => p.id === idPedido);
+  if (!pedido) throw new ErrorRegistroPedido("no_existe", `El pedido ${idPedido} no existe.`);
+  if (pedido.estado !== "ENTREGADO") {
+    throw new ErrorRegistroPedido(
+      "conflicto",
+      `Solo un pedido entregado se convierte en venta; el pedido ${idPedido} está "${pedido.estado}".`,
+    );
+  }
+  if (pedido.idVenta !== null) {
+    throw new ErrorRegistroPedido(
+      "conflicto",
+      `El pedido ${idPedido} ya se convirtió en la venta ${pedido.idVenta}.`,
+    );
+  }
+  if (datos.descuento < 0 || datos.descuento > pedido.total) {
+    throw new ErrorRegistroPedido("datos_invalidos", "El descuento debe estar entre 0 y el total del pedido.");
+  }
+
+  const ventas = await listarVentas();
+  const idVenta = ventas.reduce((mayor, v) => Math.max(mayor, v.idVenta), 0) + 1;
+  const total = pedido.total - datos.descuento;
+  anexarVentaHistorial(
+    { idVenta, fecha: new Date().toISOString(), total },
+    {
+      metodoPago: datos.metodoPago,
+      idCliente: null,
+      items: [],
+      subtotal: pedido.total,
+      descuento: datos.descuento,
+      impuestos: 0,
+      total,
+    },
+    "Tú (sesión actual)",
+    pedido.cliente,
+  );
+
+  pedido.idVenta = idVenta;
+  guardarPedidosMemoria(pedidos);
+  return { idVenta, idPedido, descuento: datos.descuento, total, metodoPago: nombreMetodo(datos.metodoPago) };
 }

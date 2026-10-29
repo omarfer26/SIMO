@@ -3,6 +3,8 @@
 // pero con nombres en camelCase como el resto del front, y con el nombre del
 // cliente y de quien lo registró ya resueltos (no solo sus ids).
 
+import type { CodigoMetodoPago } from "@/lib/ventas/tipos";
+
 // Mismos códigos que acepta el backend (CHECK de la columna `estado`).
 // Orden del ciclo (RN-04): REGISTRADO → CONFIRMADO → EN_PREPARACION →
 // LISTO → ENTREGADO; CANCELADO desde cualquiera antes de ENTREGADO.
@@ -53,6 +55,9 @@ export interface Pedido {
   fechaSolicitud: Date;
   fechaEntregaPactada: Date;
   total: number;
+  /** SCRUM-59 (Camilo) — Venta en la que se convirtió el pedido ya entregado
+   *  (HU-12); null = todavía no se ha convertido. */
+  idVenta: number | null;
 }
 
 // SCRUM-57 (Camilo) — Lo que se manda al registrar un pedido nuevo desde el
@@ -84,4 +89,23 @@ export interface PedidoRegistrado {
   /** El backend avisa si hoy no alcanza el stock de algún producto. No
    *  impide registrar: el stock se descuenta al pasar a EN_PREPARACION. */
   advertencia: string | null;
+}
+
+// SCRUM-59 (Camilo) — Conversión de un pedido ENTREGADO en venta (HU-12).
+// Sigue POST /api/orders/:id/convert-to-sale (rama back-end, SCRUM-62 de
+// Ramón): la venta toma el cliente, los productos y los precios del pedido.
+export interface DatosConversionVenta {
+  metodoPago: CodigoMetodoPago;
+  /** En pesos; 0 = sin descuento. */
+  descuento: number;
+}
+
+export interface VentaDePedido {
+  idVenta: number;
+  idPedido: number;
+  descuento: number;
+  /** Lo que se cobró: total del pedido − descuento. */
+  total: number;
+  /** Nombre legible del método ("Nequi"), para el aviso de éxito. */
+  metodoPago: string;
 }
