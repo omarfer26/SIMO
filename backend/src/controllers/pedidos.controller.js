@@ -5,6 +5,7 @@ const {
     obtenerPedido,
     listarPedidos,
     cambiarEstadoPedido,
+    obtenerComprobanteCancelacion,
     convertirEnVenta,
     buscarMetodoPago,
     obtenerVentaDePedido,
@@ -28,6 +29,7 @@ const ERRORES_PEDIDO = {
     SM021: [409, 'Conflict'],
     SM022: [400, 'Bad Request'],
     SM023: [400, 'Bad Request'],
+    SM024: [409, 'Conflict'],
     // Transición fuera del ciclo (trigger fn_validar_transicion_pedido, 004)
     23514: [409, 'Conflict'],
 };
@@ -188,6 +190,23 @@ async function getPedido(req, res) {
     }
 }
 
+// Mensajes del caso de uso CU-13
+const MENSAJE_SIN_CAUSA = 'La causa de cancelación es obligatoria.';
+
+// Respuesta de una cancelación: pedido, estado y comprobante de reversión
+async function responderCancelacion(res, idPedido) {
+    const pedido = await obtenerPedido(idPedido);
+    const comprobante = await obtenerComprobanteCancelacion(idPedido);
+    const devolvioStock = comprobante && comprobante.reversion.length > 0;
+    return res.status(200).json({
+        message: devolvioStock ? 'Pedido cancelado e inventario devuelto' : 'Pedido cancelado',
+        id_pedido: pedido.id_pedido,
+        estado: pedido.estado,
+        comprobante,
+        pedido,
+    });
+}
+
 // =====================================================================
 // PATCH /api/orders/:id/status (SCRUM-61, contrato del frontend SCRUM-58/125)
 // Body: { estado, motivo? }. El ciclo es REGISTRADO -> CONFIRMADO ->
@@ -214,7 +233,7 @@ async function patchEstadoPedido(req, res) {
             return badRequest(res, 'El motivo debe ser un texto de máximo 500 caracteres.');
         }
         if (estado === 'CANCELADO' && (typeof motivo !== 'string' || !motivo.trim())) {
-            return badRequest(res, 'Para cancelar un pedido debe indicar el motivo.');
+            return badRequest(res, MENSAJE_SIN_CAUSA);
         }
 
         const resultado = await cambiarEstadoPedido({
@@ -223,13 +242,12 @@ async function patchEstadoPedido(req, res) {
             idUsuario: Number(idUsuario),
             motivo: typeof motivo === 'string' ? motivo.trim() : null,
         });
+        if (estado === 'CANCELADO') {
+            return responderCancelacion(res, resultado.id_pedido);
+        }
         const pedido = await obtenerPedido(resultado.id_pedido);
-        const mensajes = {
-            EN_PREPARACION: 'Pedido en preparación: el stock fue descontado',
-            CANCELADO: 'Pedido cancelado',
-        };
         return res.status(200).json({
-            message: mensajes[estado] || 'Estado del pedido actualizado',
+            message: estado === 'EN_PREPARACION' ? 'Pedido en preparación: el stock fue descontado' : 'Estado del pedido actualizado',
             id_pedido: pedido.id_pedido,
             estado: pedido.estado,
             pedido,
@@ -305,4 +323,45 @@ async function postConvertirEnVenta(req, res) {
     }
 }
 
-module.exports = { postPedido, getPedidos, getPedido, patchEstadoPedido, postConvertirEnVenta };
+// =====================================================================
+// POST /api/orders/:id/cancel (SCRUM-100, CU-13, HU-11)
+// Body: { causa } (se acepta también "motivo"). Para el modal "Cancelar
+// pedido" con la causa obligatoria. Antes de ENTREGADO; si el pedido ya
+// descontó stock (EN_PREPARACION o LISTO), lo devuelve a su ubicación.
+// Responde el comprobante de reversión que queda en log_auditoria.
+// =====================================================================
+async function postCancelarPedido(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
+            return badRequest(res, 'El id del pedido debe ser un entero positivo.');
+        }
+        const causa = req.body?.causa ?? req.body?.motivo;
+        if (typeof causa !== 'string' || !causa.trim()) {
+            return badRequest(res, MENSAJE_SIN_CAUSA);
+        }
+        if (causa.length > 500) {
+            return badRequest(res, 'La causa de cancelación admite máximo 500 caracteres.');
+        }
+        await cambiarEstadoPedido({
+            idPedido: Number(req.params.id),
+            estado: 'CANCELADO',
+            idUsuario: Number(idUsuario),
+            motivo: causa.trim(),
+        });
+        return responderCancelacion(res, Number(req.params.id));
+    } catch (error) {
+        const negocio = ERRORES_PEDIDO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        console.error('[POST /api/orders/:id/cancel] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al cancelar el pedido.' });
+    }
+}
+
+module.exports = { postPedido, getPedidos, getPedido, patchEstadoPedido, postConvertirEnVenta, postCancelarPedido };

@@ -98,7 +98,7 @@ SELECT fn_cambiar_estado_pedido(9000802, s, u_inv) FROM ref, unnest(ARRAY['CONFI
 SELECT pg_temp.verificar('LISTO y ENTREGADO no vuelven a descontar',
     (SELECT count(*) = 1 FROM movimientos_inventario WHERE id_pedido = 9000802)
     AND (SELECT stock_bodega = 1 FROM productos WHERE id_producto = 90402));
-SELECT pg_temp.debe_fallar('Un pedido entregado no se cancela', '23514',
+SELECT pg_temp.debe_fallar('Un pedido entregado no se cancela', 'SM024',
     format($q$SELECT fn_cambiar_estado_pedido(9000802, 'CANCELADO', %s, 'tarde')$q$, u_ger)) FROM ref;
 
 -- ------------------------------ Cancelación con reverso ------------------------------

@@ -81,6 +81,7 @@ async function preparar() {
     ref.inactivo = await crearProducto('I', 'und', 2000, false);
     ref.stock = await crearProducto('S', 'und', 3000);       // SCRUM-61: Bodega 7, Almacén 3
     ref.disputado = await crearProducto('D', 'und', 1000);   // SCRUM-61: 10 en Bodega, para concurrencia
+    ref.cancelar = await crearProducto('C', 'und', 2000);    // SCRUM-100: Bodega 7, Almacén 3 (escenario CA-1)
     const inventario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
     await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.stock.id_producto, inventario]);
     await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.disputado.id_producto, inventario]);
@@ -89,6 +90,12 @@ async function preparar() {
                                              costo_unitario, saldo_bodega, saldo_almacen, id_usuario)
          VALUES ($1, 'TRASLADO_INTERNO', 'BODEGA', 'ALMACEN', 3, 1000, 7, 3, $2)`, [ref.stock.id_producto, inventario]);
     await pool.query('UPDATE productos SET stock_bodega = 7, stock_almacen = 3 WHERE id_producto = $1', [ref.stock.id_producto]);
+    await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.cancelar.id_producto, inventario]);
+    await pool.query(
+        `INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, ubicacion_destino, cantidad,
+                                             costo_unitario, saldo_bodega, saldo_almacen, id_usuario)
+         VALUES ($1, 'TRASLADO_INTERNO', 'BODEGA', 'ALMACEN', 3, 1000, 7, 3, $2)`, [ref.cancelar.id_producto, inventario]);
+    await pool.query('UPDATE productos SET stock_bodega = 7, stock_almacen = 3 WHERE id_producto = $1', [ref.cancelar.id_producto]);
     ref.vendedor = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'vendedor'`)).rows[0].id_usuario;
 
     servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
@@ -281,7 +288,7 @@ caso('Cancelar exige motivo y devuelve el stock a su ubicación', async () => {
 
     const sinMotivo = await cambiarEstado(id, { estado: 'CANCELADO' });
     assert.equal(sinMotivo.status, 400);
-    assert.match(sinMotivo.body.message, /motivo/);
+    assert.equal(sinMotivo.body.message, 'La causa de cancelación es obligatoria.');
     const cancelado = await cambiarEstado(id, { estado: 'CANCELADO', motivo: 'El cliente desistió' });
     assert.equal(cancelado.status, 200);
     assert.equal(cancelado.body.estado, 'CANCELADO');
@@ -392,6 +399,80 @@ caso('Conversión: roles VENDEDOR, GERENTE y ADMIN; /convertir-venta es alias', 
     const r = await convertir(id, { id_metodo_pago: 1 }, await iniciarSesion(PORT, 'gerente@simo.local'), 'convertir-venta');
     assert.equal(r.status, 201);
     assert.equal(r.body.venta.nombre_usuario, 'Gerente SIMO');
+});
+
+// ------------------------------ Cancelación de pedidos (SCRUM-100, CU-13) ------------------------------
+
+const cancelar = (id, cuerpo, tokenSesion, ruta = 'cancel') => api(`/${id}/${ruta}`, { metodo: 'POST', cuerpo, tokenSesion });
+
+caso('CA-1: cancelar en preparación devuelve 3 al Almacén y 2 a Bodega, con comprobante', async () => {
+    const id = await pedidoDe(ref.cancelar, 5);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    await cambiarEstado(id, { estado: 'EN_PREPARACION' });
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 5, almacen: 0 });
+
+    const { status, body } = await cancelar(id, { causa: 'El cliente ya no lo necesita' });
+    assert.equal(status, 200);
+    assert.equal(body.message, 'Pedido cancelado e inventario devuelto');
+    assert.equal(body.estado, 'CANCELADO');
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 7, almacen: 3 });
+    const c = body.comprobante;
+    assert.equal(c.causa, 'El cliente ya no lo necesita');
+    assert.equal(c.nombre_usuario, 'Vendedor SIMO');
+    assert.equal(c.estado_anterior, 'EN_PREPARACION');
+    assert.ok(c.fecha);
+    assert.deepEqual(c.reversion.map((r) => [r.ubicacion, Number(r.cantidad)]), [['ALMACEN', 3], ['BODEGA', 2]]);
+    assert.deepEqual([Number(c.reversion[1].saldo_bodega), Number(c.reversion[1].saldo_almacen)], [7, 3]);
+    assert.equal(body.pedido.historial.at(-1).motivo, 'El cliente ya no lo necesita');
+    ref.cancelado = id;
+});
+
+caso('EX-2: sin causa responde 400 con el mensaje del CU y no cambia nada', async () => {
+    const id = await pedidoDe(ref.cancelar, 1);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    for (const cuerpo of [{}, { causa: '   ' }, { causa: 5 }]) {
+        const r = await cancelar(id, cuerpo);
+        assert.equal(r.status, 400, JSON.stringify(cuerpo));
+        assert.equal(r.body.message, 'La causa de cancelación es obligatoria.');
+    }
+    assert.equal((await api(`/${id}`)).body.pedido.estado, 'CONFIRMADO');
+    // Sin stock descontado: se cancela sin reversión ("motivo" se acepta como sinónimo)
+    const r = await cancelar(id, { motivo: 'Pedido duplicado' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.message, 'Pedido cancelado');
+    assert.deepEqual(r.body.comprobante.reversion, []);
+});
+
+caso('EX-1 / CA-2: un pedido entregado no se cancela; uno cancelado tampoco otra vez', async () => {
+    const entregado = await cancelar(ref.entregado, { causa: 'tarde' });
+    assert.equal(entregado.status, 409);
+    assert.equal(entregado.body.message, 'No se puede cancelar un pedido ya entregado. Utilice el módulo de anulación si aplica.');
+    const otraVez = await cancelar(ref.cancelado, { causa: 'otra vez' });
+    assert.equal(otraVez.status, 409);
+    assert.match(otraVez.body.message, /ya está cancelado/);
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 7, almacen: 3 });   // no devolvió dos veces
+    assert.equal((await cancelar(99999999, { causa: 'x' })).status, 404);
+    assert.equal((await cancelar('abc', { causa: 'x' })).status, 400);
+});
+
+caso('Cancelar por PATCH /status también entrega el comprobante', async () => {
+    const id = await pedidoDe(ref.cancelar, 2);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    await cambiarEstado(id, { estado: 'EN_PREPARACION' });
+    const r = await cambiarEstado(id, { estado: 'CANCELADO', motivo: 'Dirección errada' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.message, 'Pedido cancelado e inventario devuelto');
+    assert.deepEqual(r.body.comprobante.reversion.map((x) => [x.ubicacion, Number(x.cantidad)]), [['ALMACEN', 2]]);
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 7, almacen: 3 });
+});
+
+caso('Cancelación: roles VENDEDOR, GERENTE y ADMIN; /cancelar es alias', async () => {
+    const id = await pedidoDe(ref.kg, 1);
+    assert.equal((await cancelar(id, { causa: 'x' }, null)).status, 401);
+    assert.equal((await cancelar(id, { causa: 'x' }, await iniciarSesion(PORT, 'inventario@simo.local'))).status, 403);
+    const r = await cancelar(id, { causa: 'Lo pidió el cliente' }, await iniciarSesion(PORT, 'gerente@simo.local'), 'cancelar');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.comprobante.nombre_usuario, 'Gerente SIMO');
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18

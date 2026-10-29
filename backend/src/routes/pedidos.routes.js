@@ -1,7 +1,7 @@
 // src/routes/pedidos.routes.js
 // Pedidos de clientes. Montado en /api/orders desde index.js.
 const express = require('express');
-const { postPedido, getPedidos, getPedido, patchEstadoPedido, postConvertirEnVenta } = require('../controllers/pedidos.controller');
+const { postPedido, getPedidos, getPedido, patchEstadoPedido, postConvertirEnVenta, postCancelarPedido } = require('../controllers/pedidos.controller');
 const { verificarToken, verificarRol } = require('../../middleware/authMiddleware');
 
 const router = express.Router();
@@ -20,6 +20,11 @@ router.get('/:id', verificarToken, verificarRol('VENDEDOR', 'GERENTE', 'ADMIN', 
 const rolesEstado = verificarRol('VENDEDOR', 'INVENTARIO', 'GERENTE', 'ADMIN');
 router.patch('/:id/status', verificarToken, rolesEstado, patchEstadoPedido);
 router.patch('/:id/estado', verificarToken, rolesEstado, patchEstadoPedido);
+
+// SCRUM-100: cancelación con causa obligatoria y comprobante (CU-13). Actor
+// principal: Vendedor; también Gerente y Administrador. /cancelar es alias.
+router.post('/:id/cancel', verificarToken, verificarRol('VENDEDOR', 'GERENTE', 'ADMIN'), postCancelarPedido);
+router.post('/:id/cancelar', verificarToken, verificarRol('VENDEDOR', 'GERENTE', 'ADMIN'), postCancelarPedido);
 
 // SCRUM-62: pedido entregado -> venta en un clic (HU-12). /convertir-venta, alias.
 const rolesVenta = verificarRol('VENDEDOR', 'GERENTE', 'ADMIN');

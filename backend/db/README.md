@@ -22,7 +22,8 @@ db/
 │   ├── 014_ajustes_inventario.sql fn_registrar_ajuste y orden del Kardex con concurrencia (SCRUM-42)
 │   ├── 015_pedidos.sql         total y reglas de las líneas de pedido (SCRUM-81)
 │   ├── 016_estados_pedido.sql  fn_cambiar_estado_pedido: stock al preparar y al cancelar (SCRUM-61)
-│   └── 017_pedido_a_venta.sql  fn_convertir_pedido_en_venta, sin mover stock (SCRUM-62)
+│   ├── 017_pedido_a_venta.sql  fn_convertir_pedido_en_venta, sin mover stock (SCRUM-62)
+│   └── 018_cancelacion_pedidos.sql cancelación según CU-13: mensajes y saldo reversado en auditoría (SCRUM-100)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
@@ -36,7 +37,8 @@ db/
     ├── 005_ajustes.sql           20 pruebas de ajustes manuales y su auditoría (no deja datos)
     ├── 006_pedidos.sql           12 pruebas de las líneas y el total de los pedidos (no deja datos)
     ├── 007_estados_pedido.sql    17 pruebas del ciclo de estados con descuento y reverso de stock (no deja datos)
-    └── 008_pedido_a_venta.sql    13 pruebas de la conversión de pedido entregado en venta (no deja datos)
+    ├── 008_pedido_a_venta.sql    13 pruebas de la conversión de pedido entregado en venta (no deja datos)
+    └── 009_cancelacion_pedidos.sql 11 pruebas de la cancelación según CU-13 (no deja datos)
 ```
 
 ## Cómo crear la base

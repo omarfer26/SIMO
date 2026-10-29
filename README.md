@@ -302,6 +302,20 @@ Consulta:
 - Errores: `400` estado inválido o cancelación sin motivo, `404` pedido inexistente, `409` transición fuera del ciclo o stock insuficiente.
 - Todo ocurre en la función `fn_cambiar_estado_pedido` (migración 016), en una sola transacción.
 
+#### Cancelación de pedidos (SCRUM-100 / HU-11 / CU-13)
+
+`POST /api/orders/:id/cancel` (alias `/cancelar`), roles `VENDEDOR` / `GERENTE` / `ADMIN`, para el modal "Cancelar pedido":
+
+```json
+{ "causa": "El cliente ya no lo necesita" }
+```
+
+- Antes de `ENTREGADO`. Si el pedido ya descontó stock (`EN_PREPARACION` o `LISTO`), cada cantidad vuelve a su ubicación de origen (`REVERSO_PEDIDO` en el Kardex).
+- Responde `200` con `{ message, id_pedido, estado, comprobante, pedido }`. `message` es *"Pedido cancelado e inventario devuelto"* (o *"Pedido cancelado"* si no había stock que devolver) y `comprobante` = `{ fecha, nombre_usuario, causa, estado_anterior, reversion: [ { sku, ubicacion, cantidad, saldo_bodega, saldo_almacen } ] }`.
+- El comprobante sale del registro inalterable `CANCELACION_PEDIDO` de `log_auditoria` (CU-13 RB-3).
+- Errores con los mensajes del CU: `400` *"La causa de cancelación es obligatoria."* (EX-2), `409` *"No se puede cancelar un pedido ya entregado. Utilice el módulo de anulación si aplica."* (EX-1) o pedido ya cancelado, `404` pedido inexistente.
+- `PATCH /api/orders/:id/status` con `{ "estado": "CANCELADO", "motivo": "..." }` hace lo mismo y también responde el comprobante.
+
 #### Pedido entregado a venta (SCRUM-62 / HU-12)
 
 `POST /api/orders/:id/convert-to-sale` (alias `/convertir-venta`), roles `VENDEDOR` / `GERENTE` / `ADMIN`:

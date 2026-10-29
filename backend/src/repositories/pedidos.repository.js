@@ -118,6 +118,23 @@ async function cambiarEstadoPedido({ idPedido, estado, idUsuario, motivo }) {
     return rows[0];
 }
 
+// SCRUM-100: comprobante de la cancelación (CU-13 paso 9), tomado del registro
+// inalterable de auditoría: quién, cuándo, causa y qué cantidades volvieron a
+// cada ubicación con el saldo resultante.
+async function obtenerComprobanteCancelacion(idPedido) {
+    const { rows } = await pool.query(
+        `SELECT l.fecha, l.id_usuario, u.nombre_completo AS nombre_usuario, l.justificacion AS causa,
+                l.datos_anteriores ->> 'estado' AS estado_anterior,
+                coalesce(l.datos_nuevos -> 'reversion', '[]'::jsonb) AS reversion
+         FROM log_auditoria l
+         JOIN usuarios u ON u.id_usuario = l.id_usuario
+         WHERE l.accion = 'CANCELACION_PEDIDO' AND l.entidad = 'pedidos' AND l.id_entidad = $1
+         ORDER BY l.id_log DESC LIMIT 1`,
+        [idPedido]
+    );
+    return rows[0] || null;
+}
+
 // SCRUM-62: pedido ENTREGADO -> venta, sin mover stock (fn_convertir_pedido_en_venta, 017)
 async function convertirEnVenta({ idPedido, idUsuario, idMetodoPago, descuento }) {
     const { rows } = await pool.query(
@@ -169,6 +186,7 @@ module.exports = {
     obtenerPedido,
     listarPedidos,
     cambiarEstadoPedido,
+    obtenerComprobanteCancelacion,
     convertirEnVenta,
     buscarMetodoPago,
     obtenerVentaDePedido,
