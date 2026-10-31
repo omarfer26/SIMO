@@ -1,1 +1,0 @@
-Docker Compose-based deployment of SIMO's PostgreSQL, Express API, Next.js frontend, Cloudflare tunnel, and automated daily backups with restore tooling.

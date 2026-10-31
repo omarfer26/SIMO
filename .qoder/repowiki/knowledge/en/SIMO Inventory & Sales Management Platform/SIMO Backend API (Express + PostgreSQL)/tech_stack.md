@@ -1,1 +1,0 @@
-Node.js + Express 5, `pg` for PostgreSQL, `jsonwebtoken` + `bcrypt` for auth, `helmet` + `express-rate-limit` for security, and a flat migration set under `db/migrations/` (001–013) plus Neon-specific migrations.

@@ -20,6 +20,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -36,11 +37,20 @@ export type OrigenProductos = "cargando" | "backend" | "respaldo";
 interface ProductosContextValue {
   productos: Producto[];
   origen: OrigenProductos;
+  /** Momento del último GET /products que sí respondió (null si aún no hay). */
+  ultimaSincronizacion: Date | null;
   agregarProducto: (datos: ProductoNuevo) => Promise<void>;
   descontarStock: (vendidos: { id: number; cantidad: number }[]) => void;
   reponerStock: (devueltos: { id: number; cantidad: number }[]) => void;
   actualizarUbicaciones: (id: number, saldoBodega: number, saldoAlmacen: number) => void;
   limpiarProductos: () => void;
+  /**
+   * Centro de notificaciones — Vuelve a pedir el catálogo al backend y dice si
+   * funcionó. Lo llama VigilanteStockMinimo en su sondeo periódico; devuelve
+   * false sin tocar `productos` ni `origen`, porque lo que ya está en pantalla
+   * sigue siendo la última foto válida del inventario.
+   */
+  refrescarProductos: () => Promise<boolean>;
 }
 
 const ProductosContext = createContext<ProductosContextValue | null>(null);
@@ -126,27 +136,53 @@ async function pedirProductos(): Promise<Producto[]> {
   return filas.map(aProducto);
 }
 
+// La carga devuelve un resultado en lugar de lanzar, para que quien llama
+// decida qué hacer si falla (tirar del respaldo en la primera carga, o avisar
+// en una revalidación) sin repetir el try/catch en cada sitio.
+type ResultadoCarga = { ok: true; lista: Producto[] } | { ok: false; error: unknown };
+
+async function cargarLista(): Promise<ResultadoCarga> {
+  try {
+    return { ok: true, lista: await pedirProductos() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
 export function ProductosProvider({ children }: { children: ReactNode }) {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [origen, setOrigen] = useState<OrigenProductos>("cargando");
+  const [ultimaSincronizacion, setUltimaSincronizacion] = useState<Date | null>(null);
 
   useEffect(() => {
     let vigente = true;
-    pedirProductos()
-      .then((lista) => {
-        if (!vigente) return;
-        setProductos(lista);
+    cargarLista().then((resultado) => {
+      if (!vigente) return;
+      if (resultado.ok) {
+        setProductos(resultado.lista);
         setOrigen("backend");
-      })
-      .catch((error) => {
-        if (!vigente) return;
-        console.error("No se pudo cargar el catálogo desde el backend", error);
-        setProductos(productosMock);
-        setOrigen("respaldo");
-      });
+        setUltimaSincronizacion(new Date());
+        return;
+      }
+      console.error("No se pudo cargar el catálogo desde el backend", resultado.error);
+      setProductos(productosMock);
+      setOrigen("respaldo");
+    });
     return () => {
       vigente = false;
     };
+  }, []);
+
+  const refrescarProductos = useCallback(async (): Promise<boolean> => {
+    const resultado = await cargarLista();
+    if (!resultado.ok) {
+      console.error("No se pudo revalidar el catálogo desde el backend", resultado.error);
+      return false;
+    }
+    setProductos(resultado.lista);
+    setOrigen("backend");
+    setUltimaSincronizacion(new Date());
+    return true;
   }, []);
 
   async function agregarProducto(datos: ProductoNuevo) {
@@ -287,11 +323,13 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
       value={{
         productos,
         origen,
+        ultimaSincronizacion,
         agregarProducto,
         descontarStock,
         reponerStock,
         actualizarUbicaciones,
         limpiarProductos,
+        refrescarProductos,
       }}
     >
       {children}

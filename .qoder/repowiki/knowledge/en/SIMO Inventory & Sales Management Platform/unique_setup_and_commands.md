@@ -1,1 +1,0 @@
-`npm install:all` installs dependencies in both `backend` and `simoapp`, and `npm run dev` starts them concurrently — this is the canonical local development entry point.

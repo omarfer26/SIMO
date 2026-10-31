@@ -1,1 +1,0 @@
-Node.js + Express router; PostgreSQL via pg pool, invoking PL/pgSQL functions `fn_registrar_ingreso_bodega` and `sp_confirmar_compra`; JWT-authenticated sessions injected as `req.user` by upstream middleware.

@@ -1,5 +1,0 @@
-- Business error codes (SM0xx) are declared in a local map (`ERRORES_NEGOCIO`, `ERRORES_COMPRA`) mapping code → `[httpStatus, name]`, then resolved in the catch block to return a uniform `{error, message}` JSON response.
-- Positive integer parameters are validated with the shared `REGEX_ENTERO_POSITIVO = /^[1-9]\d*$/` regex applied to `String(value)` before conversion to `Number`.
-- Numeric fields accept either native numbers or numeric strings through the `aNumero` helper, which rejects empty/NaN/Infinity values, and decimal precision is checked via `excedeDecimales` using scaled rounding tolerance of `1e-6`.
-- Optional text fields (`documento_referencia`, `observacion`) are validated uniformly by iterating over a `[[campo, valor, maximo]]` array and rejecting non-string or oversized inputs with a templated message.
-- Repository functions return plain objects/sets/maps (rows[0], Set, Map) without wrapping them in domain classes, keeping the layer thin around raw SQL.

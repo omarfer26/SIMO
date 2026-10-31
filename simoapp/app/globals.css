@@ -12,6 +12,27 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Centro de notificaciones — Entrada de los Toasts. En Tailwind v4 las
+   animaciones se declaran como tokens --animate-* dentro de @theme, con los
+   @keyframes adentro del mismo bloque para que Tailwind los emita. De esto
+   sale la clase `animate-notificacion-entrada` que usa components/ui/Toast.tsx
+   (el proyecto no trae tailwindcss-animate, y por eso las clases `animate-in`
+   que estaban escritas a mano en /ventas nunca hicieron nada). */
+@theme {
+  --animate-notificacion-entrada: notificacion-entrada 200ms ease-out both;
+
+  @keyframes notificacion-entrada {
+    from {
+      opacity: 0;
+      transform: translateY(-0.5rem) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;

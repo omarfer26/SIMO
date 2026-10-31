@@ -1,5 +1,0 @@
-- Feature-scoped code is split across three parallel locations: a page entry under `app/(protected)/<feature>/page.tsx`, reusable UI components under `components/<feature>/`, and business/API logic under `lib/<feature>/`.
-- Authentication state is stored in cookies (`token`, `role`) rather than localStorage; both `middleware.ts` and `lib/apiClient.ts` read/write these cookies through helpers in `lib/auth/sesion.ts`.
-- Protected routes are grouped inside the `(protected)` Next.js route group so that the root layout does not render the Shell or catalog context for public pages like `/login` and `/recuperar-password`.
-- Reusable presentational primitives (Button, Modal, Badge, InputText, Select, Skeleton, Spinner, etc.) live in `components/ui/` and are consumed by feature components instead of being duplicated.
-- Mock data files co-locate with their feature components (e.g. `productos.mock.ts`, `datos.mock.ts`, `authService.mock.ts`) alongside real implementations for local development.

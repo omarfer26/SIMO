@@ -10,6 +10,7 @@ import { useState } from "react";
 import Navbar from "./Navbar";
 import Sidebar from "./Sidebar";
 import BannerConexion from "./BannerConexion";
+import BannerStockMinimo from "@/components/notificaciones/BannerStockMinimo";
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [sidebarAbiertoEnMobile, setSidebarAbiertoEnMobile] = useState(false);
@@ -31,6 +32,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             encima del Sidebar, para no tapar el menú al hacer scroll. */}
         <main className="min-w-0 flex-1">
           <BannerConexion />
+          {/* Centro de notificaciones — Resumen fijo de las reposiciones
+              pendientes. Va debajo del banner de conexión y no es sticky, para
+              que los dos no se pisen el mismo top-14. */}
+          <BannerStockMinimo />
           {children}
         </main>
       </div>

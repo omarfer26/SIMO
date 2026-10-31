@@ -1,1 +1,0 @@
-Express route layer for customer CRUD and history, validating input and delegating to a PostgreSQL repository for the clientes table.

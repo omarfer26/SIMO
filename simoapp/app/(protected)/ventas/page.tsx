@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useProductos } from "@/components/catalogo/ProductosContext";
+import { useNotificaciones } from "@/components/notificaciones/NotificacionesContext";
+import { ACCION_VER_INVENTARIO } from "@/lib/notificaciones/mensajes";
+import type { NotificacionNueva } from "@/lib/notificaciones/tipos";
 import type { Producto } from "@/components/catalogo/tipos";
 import InputText from "@/components/ui/InputText";
 import Button from "@/components/ui/Button";
@@ -45,8 +48,13 @@ function cuandoSeGuardo(fecha: Date) {
   return fecha.toDateString() === new Date().toDateString() ? `a las ${hora}` : `ayer a las ${hora}`;
 }
 
+// Centro de notificaciones — Todo aviso del POS sale con origen "pos", para no
+// repetirlo en cada llamada.
+type AvisoPos = Omit<NotificacionNueva, "origen">;
+
 export default function VentasPage() {
   const { productos, origen, descontarStock, reponerStock } = useProductos();
+  const { notificar } = useNotificaciones();
   const [pestañaActiva, setPestañaActiva] = useState<"pos" | "historial">("pos");
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
@@ -94,8 +102,6 @@ export default function VentasPage() {
     if (recuperacion === "lista") guardarCanasta(canasta, leerIdUsuario());
   }, [canasta, recuperacion]);
 
-  const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
-  const [ultimoEscaneado, setUltimoEscaneado] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState(false);
 
   // SCRUM-123 (Camilo) — Cliente de la venta. null = Consumidor final.
@@ -141,10 +147,12 @@ export default function VentasPage() {
     setEligiendoCliente(true);
   };
 
-  const mostrarAlerta = (mensaje: string, tipo: "error" | "exito" = "error") => {
-    setAlerta({ mensaje, tipo });
-    setTimeout(() => setAlerta(null), tipo === "exito" ? 6000 : 3000);
-  };
+  // Centro de notificaciones — Antes el POS tenía un Toast propio (un useState
+  // con su setTimeout) pintado a mano en el JSX. Ahora el aviso entra a la cola
+  // global: ahí se decide cuánto dura, cómo se ve, cómo lo anuncia el lector de
+  // pantalla y si queda en la Campana. Las alertas de stock NO se disparan acá:
+  // descontarStock/reponerStock mueven el catálogo y VigilanteStockMinimo avisa.
+  const avisar = (aviso: AvisoPos) => notificar({ origen: "pos", ...aviso });
 
   // 1. Buscador Predictivo (Filtra por nombre o SKU)
   const productosFiltrados = productos.filter((p) => {
@@ -162,12 +170,19 @@ export default function VentasPage() {
   };
 
   // 2. Funciones de Canasta
-  const agregarProducto = (producto: Producto) => {
+  // Devuelve si el producto alcanzó a entrar, para no festejar un escaneo que
+  // se rechazó por falta de stock.
+  const agregarProducto = (producto: Producto): boolean => {
     const stockDisponible = getStockDisponible(producto);
 
     if (stockDisponible <= 0) {
-      mostrarAlerta(`¡Agotado! No hay más unidades disponibles de ${producto.nombre}`);
-      return;
+      avisar({
+        variante: "critico",
+        titulo: `Agotado: ${producto.nombre}`,
+        detalle: `${producto.codigo} · no quedan unidades disponibles para la canasta.`,
+        accion: ACCION_VER_INVENTARIO,
+      });
+      return false;
     }
 
     setCanasta((prev) => {
@@ -183,6 +198,7 @@ export default function VentasPage() {
 
       return [...prev, { producto, cantidad: 1 }];
     });
+    return true;
   };
 
   // Función para procesar y agregar directamente un código de barras / SKU escaneado
@@ -195,12 +211,23 @@ export default function VentasPage() {
     );
 
     if (productoEncontrado) {
-      agregarProducto(productoEncontrado);
-      setUltimoEscaneado(productoEncontrado.nombre);
-      setTimeout(() => setUltimoEscaneado(null), 2500);
+      if (agregarProducto(productoEncontrado)) {
+        avisar({
+          variante: "exito",
+          titulo: "Escaneado y agregado",
+          detalle: productoEncontrado.nombre,
+          // El lector de códigos dispara esto varias veces por minuto: dura poco
+          // a propósito, como el aviso anterior (2500 ms).
+          duracionMs: 2500,
+        });
+      }
       setBusqueda("");
     } else {
-      mostrarAlerta(`Código no encontrado: "${skuOcodigo.trim()}"`);
+      avisar({
+        variante: "critico",
+        titulo: "Código no encontrado",
+        detalle: `Ningún producto activo coincide con “${skuOcodigo.trim()}”.`,
+      });
     }
   };
 
@@ -247,20 +274,27 @@ export default function VentasPage() {
   }, [productos, canasta]);
 
   const modificarCantidad = (id: number, delta: number) => {
-    setCanasta((prev) => {
-      return prev.map((item) => {
-        if (item.producto.id === id) {
-          const nuevaCantidad = item.cantidad + delta;
-          if (nuevaCantidad > item.producto.stockActual) {
-            mostrarAlerta(`Stock insuficiente. Solo quedan ${item.producto.stockActual} en total.`);
-            return item;
-          }
-          if (nuevaCantidad < 1) return item; // Para eliminar, se usa otra función
-          return { ...item, cantidad: nuevaCantidad };
-        }
-        return item;
+    // La revisión se hace fuera del actualizador de setCanasta: notificar desde
+    // ahí dentro sería un efecto secundario en plena cuenta de React (en doble
+    // render estricto el mismo aviso saldría dos veces).
+    const item = canasta.find((linea) => linea.producto.id === id);
+    if (!item) return;
+
+    const nuevaCantidad = item.cantidad + delta;
+    if (nuevaCantidad < 1) return; // Para eliminar, se usa otra función
+
+    if (nuevaCantidad > item.producto.stockActual) {
+      avisar({
+        variante: "critico",
+        titulo: `Stock insuficiente: ${item.producto.nombre}`,
+        detalle: `Solo quedan ${item.producto.stockActual} ${item.producto.unidadMedida.toLowerCase()} en total.`,
       });
-    });
+      return;
+    }
+
+    setCanasta((prev) =>
+      prev.map((linea) => (linea.producto.id === id ? { ...linea, cantidad: nuevaCantidad } : linea)),
+    );
   };
 
   const eliminarDeCanasta = (id: number) => {
@@ -276,38 +310,6 @@ export default function VentasPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8 relative">
-      {/* Toast Notification Error/Agotado */}
-      {alerta && (
-        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
-          <div
-            role="status"
-            className={`text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border ${alerta.tipo === "exito" ? "bg-emerald-600 border-emerald-700" : "bg-red-600 border-red-700"
-              }`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              {alerta.tipo === "exito" ? (
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-              ) : (
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              )}
-            </svg>
-            <span className="font-medium text-sm">{alerta.mensaje}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Feedback de Escaneo Exitoso */}
-      {ultimoEscaneado && (
-        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
-          <div className="bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-emerald-700">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            <span className="font-medium text-sm">Escaneado y agregado: <strong>{ultimoEscaneado}</strong></span>
-          </div>
-        </div>
-      )}
-
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
@@ -365,7 +367,11 @@ export default function VentasPage() {
                   setModalAnularAbierto(true);
                 } else {
                   setPestañaActiva("historial");
-                  mostrarAlerta("No hay ventas recientes activas. Seleccione una del historial.", "error");
+                  avisar({
+                    variante: "aviso",
+                    titulo: "No hay ventas recientes activas",
+                    detalle: "Seleccione una del historial para anularla.",
+                  });
                 }
               }}
               title="Anular la venta más reciente registrada en caja"
@@ -488,7 +494,11 @@ export default function VentasPage() {
                 cargando={cargandoCajeros}
                 onCambiarCajero={(cajero) => {
                   setCajeroActual(cajero);
-                  mostrarAlerta(`Cajero en turno: ${cajero.nombreCompleto}`, "exito");
+                  avisar({
+                    variante: "info",
+                    titulo: "Cajero en turno",
+                    detalle: cajero.nombreCompleto,
+                  });
                 }}
               />
             </div>
@@ -682,7 +692,13 @@ export default function VentasPage() {
             })),
           );
 
-          mostrarAlerta(resultado.mensaje, "exito");
+          // El aviso de reposición no se arma acá: reponerStock ya movió el
+          // catálogo y VigilanteStockMinimo detecta la transición de cada producto.
+          avisar({
+            variante: "exito",
+            titulo: "Venta anulada",
+            detalle: resultado.mensaje,
+          });
         }}
       />
 
@@ -749,11 +765,13 @@ export default function VentasPage() {
             );
             setVentasHistorial((prev) => [ventaGuardadaHistorial, ...prev]);
 
-            mostrarAlerta(
-              `Venta #${venta.idVenta} registrada por ${formatoMoneda.format(venta.total)}.` +
-              (cambio > 0 ? ` Cambio: ${formatoMoneda.format(cambio)}.` : ""),
-              "exito",
-            );
+            avisar({
+              variante: "exito",
+              titulo: `Venta #${venta.idVenta} registrada`,
+              detalle:
+                `${formatoMoneda.format(venta.total)}` +
+                (cambio > 0 ? ` · Cambio ${formatoMoneda.format(cambio)}` : ""),
+            });
           }}
         />
       </Modal>
