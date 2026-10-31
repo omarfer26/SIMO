@@ -21,18 +21,14 @@ import { useState, type SubmitEvent } from "react";
 import Button from "@/components/ui/Button";
 import InputNumber from "@/components/ui/InputNumber";
 import { Spinner } from "@/components/ui/Spinner";
+import SelectorMetodoPago from "@/components/ventas/SelectorMetodoPago";
 import {
   calcularLiquidacion,
   sugerenciasEfectivo,
   validarLiquidacion,
   type ErroresLiquidacion,
 } from "@/lib/ventas/liquidacion";
-import {
-  METODOS_PAGO,
-  type CodigoMetodoPago,
-  type ItemCanasta,
-  type VentaRegistrada,
-} from "@/lib/ventas/tipos";
+import type { CodigoMetodoPago, ItemCanasta, VentaRegistrada } from "@/lib/ventas/tipos";
 import { mensajeErrorVenta, registrarVenta } from "@/lib/ventas/ventasService";
 import type { Cliente } from "@/lib/clientes/tipos";
 import { formatoDocumento } from "@/lib/clientes/validaciones";
@@ -241,63 +237,18 @@ export default function ConfirmarVenta({
         </section>
       )}
 
-      {/* 2. Método de pago: radios de verdad (accesibles con teclado y
-          lector de pantalla), con el círculo escondido y la tarjeta entera
-          como zona para hacer clic. */}
-      <fieldset disabled={enviando}>
-        <legend className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Método de pago <span className="text-red-500">*</span>
-        </legend>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {METODOS_PAGO.map((metodo) => {
-            const elegido = metodoPago === metodo.codigo;
-            return (
-              <label
-                key={metodo.codigo}
-                className={`cursor-pointer rounded-lg border px-3 py-2 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-600 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 ${
-                  elegido
-                    ? "border-emerald-600 bg-emerald-50 dark:border-emerald-500 dark:bg-emerald-950/40"
-                    : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-600"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="metodoPago"
-                  value={metodo.codigo}
-                  checked={elegido}
-                  onChange={() => {
-                    setMetodoPago(metodo.codigo);
-                    limpiarError("metodoPago");
-                    limpiarError("recibido");
-                  }}
-                  className="sr-only"
-                />
-                <span
-                  className={`block text-sm font-medium ${
-                    elegido
-                      ? "text-emerald-700 dark:text-emerald-300"
-                      : "text-zinc-900 dark:text-zinc-100"
-                  }`}
-                >
-                  {metodo.nombre}
-                </span>
-                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-                  {metodo.descripcion}
-                </span>
-              </label>
-            );
-          })}
-        </div>
-        {errores.metodoPago && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errores.metodoPago}</p>
-        )}
-        {metodoPago && !esEfectivo && (
-          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-            Verifica que el pago haya llegado antes de confirmar: el sistema solo
-            registra el método, no se conecta con el banco ni con la app.
-          </p>
-        )}
-      </fieldset>
+      {/* 2. Método de pago (SCRUM-59: ahora es SelectorMetodoPago, que
+          también usa "Convertir en venta" en /pedidos). */}
+      <SelectorMetodoPago
+        valor={metodoPago}
+        onCambiar={(codigo) => {
+          setMetodoPago(codigo);
+          limpiarError("metodoPago");
+          limpiarError("recibido");
+        }}
+        disabled={enviando}
+        error={errores.metodoPago}
+      />
 
       {/* 3. Liquidación */}
       <section className="space-y-3 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">

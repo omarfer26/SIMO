@@ -3,6 +3,9 @@
 // Tablero Visual Kanban de Estados de Pedidos
 // Agrupa los pedidos en columnas por estado progresivo y cancelados.
 // Permite mover pedidos al siguiente estado con un clic directo o ver su línea de tiempo.
+//
+// SCRUM-59 (Camilo) — En la columna "Entregado", cada tarjeta tiene el botón
+// "Convertir en venta" (HU-12), o la etiqueta "Venta #N" si ya se convirtió.
 
 import { useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
@@ -31,6 +34,8 @@ interface TableroEstadosPedidosProps {
   onCambiarEstado: (idPedido: number, nuevoEstado: EstadoPedido) => Promise<void>;
   onSeleccionarPedido: (pedido: Pedido) => void;
   pedidoSeleccionadoId?: number | null;
+  /** SCRUM-59 — Si no llega (rol sin permiso para vender), no se muestra el botón. */
+  onConvertirEnVenta?: (pedido: Pedido) => void;
 }
 
 const colorColumna: Record<EstadoPedido, { badge: BadgeVariant; border: string; headerBg: string }> = {
@@ -71,6 +76,7 @@ export default function TableroEstadosPedidos({
   onCambiarEstado,
   onSeleccionarPedido,
   pedidoSeleccionadoId,
+  onConvertirEnVenta,
 }: TableroEstadosPedidosProps) {
   const [actualizandoId, setActualizandoId] = useState<number | null>(null);
 
@@ -180,6 +186,26 @@ export default function TableroEstadosPedidos({
                                   </svg>
                                 </>
                               )}
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* SCRUM-59 — Pedido entregado: ya es venta, o se convierte con un clic */}
+                        {pedido.estado === "ENTREGADO" && pedido.idVenta !== null && (
+                          <p className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-700/60 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                            Convertido en la venta #{pedido.idVenta}
+                          </p>
+                        )}
+                        {pedido.estado === "ENTREGADO" && pedido.idVenta === null && onConvertirEnVenta && (
+                          <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-700/60">
+                            <Button
+                              className="text-[11px] py-1 px-2.5 h-auto w-full justify-center font-medium"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onConvertirEnVenta(pedido);
+                              }}
+                            >
+                              Convertir en venta
                             </Button>
                           </div>
                         )}

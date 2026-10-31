@@ -12,8 +12,22 @@
 //  - Mientras carga se ven cuadros grises; si falla, el error con un botón
 //    para reintentar; si ningún pedido cae en el rango, un mensaje con el
 //    botón "Limpiar filtro".
+//
+// SCRUM-57 (Camilo) — Botón "+ Nuevo pedido" que abre el modal con el
+// formulario de registro (components/pedidos/FormularioPedido.tsx). Al
+// registrarlo, el pedido aparece de una vez en el tablero y en la tabla como
+// "Registrado". No se le muestra al Encargado de Inventario: el backend solo
+// deja registrar pedidos a Vendedor, Gerente y Administrador.
+//
+// SCRUM-59 (Camilo) — Botón "Convertir en venta" en los pedidos entregados
+// (tablero, tabla y trazabilidad), que abre el modal
+// components/pedidos/ConvertirPedidoEnVenta.tsx (HU-12). Al confirmar, el
+// pedido queda marcado con su venta ("Venta #N") y ya no se puede convertir
+// otra vez. Mismos roles que registrar pedidos (no Inventario).
 
 import { useEffect, useState } from "react";
+import ConvertirPedidoEnVenta from "@/components/pedidos/ConvertirPedidoEnVenta";
+import FormularioPedido from "@/components/pedidos/FormularioPedido";
 import FiltroFechasPedidos, {
   RANGO_VACIO,
   filtrarPorFechas,
@@ -27,6 +41,7 @@ import Button from "@/components/ui/Button";
 import DataTable, { type ColumnaTabla } from "@/components/ui/DataTable";
 import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { leerRol } from "@/lib/auth/sesion";
 import {
   actualizarEstadoPedido,
   listarPedidos,
@@ -37,6 +52,8 @@ import {
   TRANSICIONES_VALIDAS,
   type EstadoPedido,
   type Pedido,
+  type PedidoRegistrado,
+  type VentaDePedido,
 } from "@/lib/pedidos/tipos";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
@@ -104,6 +121,18 @@ export default function PedidosPage() {
   const [vista, setVista] = useState<"tablero" | "tabla">("tablero");
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null);
   const [avisoExito, setAvisoExito] = useState<string | null>(null);
+  // SCRUM-57 — Cuántas veces se ha abierto "Nuevo pedido". Va como `key` del
+  // formulario para que cada vez arranque vacío; 0 = cerrado.
+  const [nuevoPedido, setNuevoPedido] = useState(0);
+  const [modalNuevoAbierto, setModalNuevoAbierto] = useState(false);
+  // SCRUM-59 — Pedido entregado que se está convirtiendo en venta; null = modal cerrado.
+  const [pedidoAConvertir, setPedidoAConvertir] = useState<Pedido | null>(null);
+
+  // Solo se lee cuando la lista ya llegó (en el navegador), porque el rol
+  // está en una cookie. Inventario recibiría un 403, que cierra la sesión.
+  const puedeRegistrar = lista.tipo === "lista" && leerRol() !== "INVENTARIO";
+  // SCRUM-59 — Convertir en venta lo permiten los mismos roles (backend, SCRUM-62).
+  const puedeConvertir = puedeRegistrar;
 
   const pedidosFiltrados =
     lista.tipo === "lista" ? filtrarPorFechas(lista.pedidos, rango) : [];
@@ -146,6 +175,46 @@ export default function PedidosPage() {
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Error al actualizar el estado del pedido.");
     }
+  };
+
+  // SCRUM-57 — El pedido recién registrado entra a la lista sin recargarla.
+  const manejarPedidoRegistrado = ({ pedido, advertencia }: PedidoRegistrado) => {
+    setLista((prev) =>
+      prev.tipo === "lista" ? { ...prev, pedidos: [pedido, ...prev.pedidos] } : prev,
+    );
+    // Si el filtro de fechas lo dejaría por fuera, se limpia para que se vea.
+    if (filtrarPorFechas([pedido], rango).length === 0) setRango(RANGO_VACIO);
+    setModalNuevoAbierto(false);
+    setAvisoExito(
+      `Pedido #${pedido.id} registrado para ${pedido.cliente}.${advertencia ? ` Ojo: ${advertencia}` : ""}`,
+    );
+    setTimeout(() => setAvisoExito(null), advertencia ? 8000 : 4000);
+  };
+
+  // SCRUM-59 — Abre "Convertir en venta". Cierra la trazabilidad, si estaba
+  // abierta, para no tener dos modales encima.
+  const abrirConversion = (pedido: Pedido) => {
+    setPedidoSeleccionado(null);
+    setPedidoAConvertir(pedido);
+  };
+
+  // SCRUM-59 — El pedido queda marcado con su venta, sin recargar la lista.
+  const manejarVentaConvertida = (venta: VentaDePedido) => {
+    setLista((prev) =>
+      prev.tipo === "lista"
+        ? {
+            ...prev,
+            pedidos: prev.pedidos.map((p) =>
+              p.id === venta.idPedido ? { ...p, idVenta: venta.idVenta } : p,
+            ),
+          }
+        : prev,
+    );
+    setPedidoAConvertir(null);
+    setAvisoExito(
+      `Pedido #${venta.idPedido} convertido en la venta #${venta.idVenta} · ${formatoMoneda.format(venta.total)} (${venta.metodoPago}).`,
+    );
+    setTimeout(() => setAvisoExito(null), 5000);
   };
 
   const columnas: ColumnaTabla<Pedido>[] = [
@@ -204,13 +273,26 @@ export default function PedidosPage() {
       align: "right",
       accessor: () => "",
       render: (p) => (
-        <Button
-          variant="secondary"
-          className="text-xs py-1 px-2.5 h-auto"
-          onClick={() => setPedidoSeleccionado(p)}
-        >
-          Línea de tiempo
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* SCRUM-59 — Pedido entregado: su venta, o el botón para convertirlo */}
+          {p.estado === "ENTREGADO" && p.idVenta !== null && (
+            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+              Venta #{p.idVenta}
+            </span>
+          )}
+          {p.estado === "ENTREGADO" && p.idVenta === null && puedeConvertir && (
+            <Button className="text-xs py-1 px-2.5 h-auto" onClick={() => abrirConversion(p)}>
+              Convertir en venta
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            className="text-xs py-1 px-2.5 h-auto"
+            onClick={() => setPedidoSeleccionado(p)}
+          >
+            Línea de tiempo
+          </Button>
+        </div>
       ),
     },
   ];
@@ -244,8 +326,9 @@ export default function PedidosPage() {
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
         {/* Selector de Vista: Tablero Kanban o Lista en Tabla */}
-        <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800 self-start sm:self-auto">
+        <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
           <button
             type="button"
             onClick={() => setVista("tablero")}
@@ -274,6 +357,22 @@ export default function PedidosPage() {
             </svg>
             Tabla Detallada
           </button>
+        </div>
+
+        {/* SCRUM-57 — Abre el formulario de registro */}
+        {puedeRegistrar && (
+          <Button
+            onClick={() => {
+              setNuevoPedido((n) => n + 1);
+              setModalNuevoAbierto(true);
+            }}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Nuevo pedido
+          </Button>
+        )}
         </div>
       </div>
 
@@ -315,6 +414,7 @@ export default function PedidosPage() {
                 onCambiarEstado={manejarCambiarEstado}
                 onSeleccionarPedido={(p) => setPedidoSeleccionado(p)}
                 pedidoSeleccionadoId={pedidoSeleccionado?.id}
+                onConvertirEnVenta={puedeConvertir ? abrirConversion : undefined}
               />
             )}
 
@@ -343,6 +443,41 @@ export default function PedidosPage() {
           </div>
         )}
       </div>
+
+      {/* SCRUM-57 — Modal "Nuevo pedido". Un clic afuera no lo cierra, para
+          no perder lo que ya se llenó por accidente. */}
+      <Modal
+        isOpen={modalNuevoAbierto}
+        onClose={() => setModalNuevoAbierto(false)}
+        title="Nuevo pedido"
+        maxWidth="3xl"
+        closeOnBackdropClick={false}
+      >
+        <FormularioPedido
+          key={nuevoPedido}
+          onRegistrado={manejarPedidoRegistrado}
+          onCancelar={() => setModalNuevoAbierto(false)}
+        />
+      </Modal>
+
+      {/* SCRUM-59 — Modal "Convertir en venta". La key hace que cada pedido
+          arranque con el formulario vacío. */}
+      <Modal
+        isOpen={Boolean(pedidoAConvertir)}
+        onClose={() => setPedidoAConvertir(null)}
+        title={`Convertir pedido #${pedidoAConvertir?.id} en venta`}
+        maxWidth="lg"
+        closeOnBackdropClick={false}
+      >
+        {pedidoAConvertir && (
+          <ConvertirPedidoEnVenta
+            key={pedidoAConvertir.id}
+            pedido={pedidoAConvertir}
+            onConvertida={manejarVentaConvertida}
+            onCancelar={() => setPedidoAConvertir(null)}
+          />
+        )}
+      </Modal>
 
       {/* Modal con la Línea de Tiempo Interactiva del Pedido Seleccionado */}
       <Modal
@@ -386,6 +521,24 @@ export default function PedidosPage() {
               pedido={pedidoSeleccionado}
               onCambiarEstado={manejarCambiarEstado}
             />
+
+            {/* SCRUM-59 — Pedido entregado: su venta, o el botón para convertirlo */}
+            {pedidoSeleccionado.estado === "ENTREGADO" &&
+              (pedidoSeleccionado.idVenta !== null ? (
+                <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  Este pedido ya se convirtió en la <strong>venta #{pedidoSeleccionado.idVenta}</strong>.
+                  Puedes verla en el historial de Ventas.
+                </p>
+              ) : (
+                puedeConvertir && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                    <span>Pedido entregado: ya se puede registrar como venta.</span>
+                    <Button onClick={() => abrirConversion(pedidoSeleccionado)}>
+                      Convertir en venta
+                    </Button>
+                  </div>
+                )
+              ))}
 
             <div className="flex justify-end pt-2 border-t border-zinc-200 dark:border-zinc-800">
               <Button variant="secondary" onClick={() => setPedidoSeleccionado(null)}>
