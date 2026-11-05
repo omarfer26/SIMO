@@ -13,6 +13,7 @@ import type {
   VentaHistorial,
   VentaRegistrada,
 } from "./tipos";
+import { resumirSoporte } from "./soportePago";
 // Historial de ejemplo (180 días de operación). Vive en su propio archivo
 // para no llenar este servicio de datos de prueba.
 import { ventasSemilla } from "./semillaVentas";
@@ -96,6 +97,9 @@ export function anexarVentaHistorial(
     descuento: datos.descuento,
     impuestos: datos.impuestos,
     metodoPago: datos.metodoPago,
+    // SCRUM-73 (Camilo) — Se guarda el código y los datos del comprobante
+    // (nombre, tipo y tamaño), no el archivo: no cabe en el navegador.
+    soportePago: datos.soportePago ? resumirSoporte(datos.soportePago) : null,
     estado: "COMPLETADA",
     cliente: {
       id: datos.idCliente,

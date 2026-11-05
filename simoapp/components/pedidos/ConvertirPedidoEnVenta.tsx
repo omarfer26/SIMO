@@ -9,17 +9,23 @@
 // No descuenta stock: ya salió del inventario al pasar el pedido a
 // "En preparación" (RN-02).
 // Si falla, muestra el error arriba sin cerrar el modal, para reintentar.
+//
+// SCRUM-73 (Camilo) — Con Nequi, Daviplata o Transferencia también pide el
+// código de referencia (obligatorio) y deja adjuntar el comprobante
+// (opcional), con el mismo componente del POS: SoportePagoDigital.
 
 import { useState, type SubmitEvent } from "react";
 import Button from "@/components/ui/Button";
 import InputNumber from "@/components/ui/InputNumber";
 import { Spinner } from "@/components/ui/Spinner";
 import SelectorMetodoPago from "@/components/ventas/SelectorMetodoPago";
+import SoportePagoDigital from "@/components/ventas/SoportePagoDigital";
 import type { Errores } from "@/lib/auth/validaciones";
 import { convertirPedidoEnVenta, mensajeErrorConversion } from "@/lib/pedidos/pedidosService";
 import type { Pedido, VentaDePedido } from "@/lib/pedidos/tipos";
 import { validarConversion, type CampoConversion } from "@/lib/pedidos/validaciones";
 import type { CodigoMetodoPago } from "@/lib/ventas/tipos";
+import { normalizarReferencia, requiereSoporte, validarReferencia } from "@/lib/ventas/soportePago";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -49,6 +55,11 @@ export default function ConvertirPedidoEnVenta({
   const [errores, setErrores] = useState<Errores<CampoConversion>>({});
   const [errorGeneral, setErrorGeneral] = useState("");
   const [enviando, setEnviando] = useState(false);
+  // SCRUM-73 — Soporte del pago digital (igual que en ConfirmarVenta.tsx).
+  const [referencia, setReferencia] = useState("");
+  const [comprobante, setComprobante] = useState<File | null>(null);
+  const [errorReferencia, setErrorReferencia] = useState<string>();
+  const conSoporte = requiereSoporte(metodoPago);
 
   // El error del descuento se ve en vivo (porque cambia el total); el del
   // método, solo después de intentar confirmar.
@@ -66,12 +77,20 @@ export default function ConvertirPedidoEnVenta({
     if (enviando) return;
 
     setErrores(erroresEnVivo);
-    if (Object.keys(erroresEnVivo).length > 0 || !metodoPago) return;
+    const errorRef = conSoporte ? validarReferencia(referencia) : undefined;
+    setErrorReferencia(errorRef);
+    if (Object.keys(erroresEnVivo).length > 0 || !metodoPago || errorRef) return;
+
+    const soportePago = conSoporte
+      ? { referencia: normalizarReferencia(referencia), comprobante }
+      : null;
 
     setEnviando(true);
     setErrorGeneral("");
     try {
-      onConvertida(await convertirPedidoEnVenta(pedido.id, { metodoPago, descuento }));
+      onConvertida(
+        await convertirPedidoEnVenta(pedido.id, { metodoPago, descuento, soportePago }),
+      );
     } catch (error) {
       setErrorGeneral(mensajeErrorConversion(error));
       setEnviando(false);
@@ -118,6 +137,23 @@ export default function ConvertirPedidoEnVenta({
         disabled={enviando}
         error={errores.metodoPago}
       />
+
+      {/* SCRUM-73 — Código de referencia y comprobante (Nequi, Daviplata, Transferencia) */}
+      {conSoporte && metodoPago && (
+        <SoportePagoDigital
+          metodo={metodoPago}
+          referencia={referencia}
+          onReferencia={(texto) => {
+            setReferencia(texto);
+            setErrorReferencia(undefined);
+            setErrorGeneral("");
+          }}
+          comprobante={comprobante}
+          onComprobante={setComprobante}
+          errorReferencia={errorReferencia}
+          disabled={enviando}
+        />
+      )}
 
       {/* 3. Descuento y total */}
       <section className="space-y-3 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">

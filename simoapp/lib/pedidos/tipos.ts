@@ -4,6 +4,7 @@
 // cliente y de quien lo registró ya resueltos (no solo sus ids).
 
 import type { CodigoMetodoPago } from "@/lib/ventas/tipos";
+import type { SoportePago } from "@/lib/ventas/soportePago";
 
 // Mismos códigos que acepta el backend (CHECK de la columna `estado`).
 // Orden del ciclo (RN-04): REGISTRADO → CONFIRMADO → EN_PREPARACION →
@@ -98,6 +99,8 @@ export interface DatosConversionVenta {
   metodoPago: CodigoMetodoPago;
   /** En pesos; 0 = sin descuento. */
   descuento: number;
+  /** SCRUM-73 (Camilo) — Código y comprobante si pagó por Nequi, Daviplata o Transferencia. */
+  soportePago?: SoportePago | null;
 }
 
 export interface VentaDePedido {

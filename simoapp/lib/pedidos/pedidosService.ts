@@ -189,6 +189,9 @@ export async function convertirPedidoEnVenta(
     const { data } = await apiClient.post(`/orders/${idPedido}/convert-to-sale`, {
       metodo_pago: datos.metodoPago,
       descuento: datos.descuento > 0 ? datos.descuento : undefined,
+      // SCRUM-73 — El endpoint de Ramón todavía no lo guarda (lo ignora sin
+      // error). El comprobante no se manda: ver ventasService.ts.
+      referencia_pago: datos.soportePago?.referencia || undefined,
     });
     return {
       idVenta: data.venta.id_venta,
@@ -406,6 +409,7 @@ async function convertirPedidoEnVentaMock(
       descuento: datos.descuento,
       impuestos: 0,
       total,
+      soportePago: datos.soportePago ?? null,
     },
     "Tú (sesión actual)",
     pedido.cliente,

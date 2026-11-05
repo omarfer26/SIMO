@@ -744,6 +744,7 @@ export default function VentasPage() {
               total: info?.total ?? venta.total,
               recibido: info?.recibido ?? 0,
               cambio: info?.cambio ?? cambio,
+              referenciaPago: info?.soportePago?.referencia,
             });
 
             // Guardar en el historial de transacciones para trazabilidad y anulación
@@ -758,6 +759,7 @@ export default function VentasPage() {
                 descuento: info?.descuento ?? 0,
                 impuestos: info?.impuestos ?? 0,
                 total: info?.total ?? venta.total,
+                soportePago: info?.soportePago ?? null,
               },
               cajeroVendido?.nombreCompleto,
               clienteVendido?.nombre,

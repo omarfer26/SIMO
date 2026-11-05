@@ -3,6 +3,7 @@
 // una venta.
 
 import type { Producto } from "@/components/catalogo/tipos";
+import type { SoportePago, SoportePagoGuardado } from "./soportePago";
 
 // Una línea de la canasta del POS: qué producto y cuántas unidades. Antes
 // estaba definido dentro de app/(protected)/ventas/page.tsx; se movió acá
@@ -53,6 +54,9 @@ export interface DatosVenta {
   descuento: number;
   impuestos: number;
   total: number;
+  /** SCRUM-73 (Camilo) — Código y comprobante del pago (Nequi, Daviplata o
+   *  Transferencia). null o ausente con los demás métodos. */
+  soportePago?: SoportePago | null;
 }
 
 // Lo que responde el servicio cuando la venta quedó registrada.
@@ -95,6 +99,8 @@ export interface VentaHistorial {
     nombre: string;
   } | null;
   items: DetalleVentaItem[];
+  /** SCRUM-73 (Camilo) — Soporte del pago digital (solo los datos del archivo). */
+  soportePago?: SoportePagoGuardado | null;
   // Datos de auditoría si fue anulada
   anulacion?: {
     fecha: string;

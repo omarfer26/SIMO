@@ -15,7 +15,12 @@
 //     id_cliente: number | null                 (SCRUM-123; null = Consumidor final)
 //     descuento, impuestos, subtotal, total,      (en pesos)
 //     detalles: [{ id_producto, cantidad, precio_unitario }]
+//     referencia_pago?: string                  (SCRUM-73; solo Nequi, Daviplata, Transferencia)
 //   }
+//   El comprobante (imagen o PDF, SCRUM-73) todavía no se sube: el backend no
+//   tiene dónde guardarlo. Propuesta: mandar la venta como multipart/form-data
+//   con el archivo en el campo `comprobante`, o un endpoint aparte
+//   POST /api/sales/:id/comprobante.
 //   Responde 201: { message, venta: { id_venta, fecha_venta, total } }
 //   Errores: 400 dato inválido, 409 stock insuficiente (RN-01).
 // El backend debe recalcular subtotal y total con sus propios precios y
@@ -52,6 +57,7 @@ export async function registrarVenta(datos: DatosVenta): Promise<VentaRegistrada
       descuento: datos.descuento,
       impuestos: datos.impuestos,
       total: datos.total,
+      referencia_pago: datos.soportePago?.referencia || undefined,
       detalles: datos.items.map((item) => ({
         id_producto: item.producto.id,
         cantidad: item.cantidad,

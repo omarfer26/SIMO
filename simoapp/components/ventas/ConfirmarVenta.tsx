@@ -16,12 +16,23 @@
 //
 // Igual que los formularios de usuarios, no sabe nada del modal que lo
 // envuelve: avisa por `onConfirmada` y `onCancelar`.
+//
+// SCRUM-73 (Camilo) — Con Nequi, Daviplata o Transferencia aparece debajo de
+// los métodos la sección "Soporte del pago" (SoportePagoDigital): el código
+// de referencia es obligatorio y el pantallazo o PDF, opcional.
 
 import { useState, type SubmitEvent } from "react";
 import Button from "@/components/ui/Button";
 import InputNumber from "@/components/ui/InputNumber";
 import { Spinner } from "@/components/ui/Spinner";
 import SelectorMetodoPago from "@/components/ventas/SelectorMetodoPago";
+import SoportePagoDigital from "@/components/ventas/SoportePagoDigital";
+import {
+  normalizarReferencia,
+  requiereSoporte,
+  validarReferencia,
+  type SoportePago,
+} from "@/lib/ventas/soportePago";
 import {
   calcularLiquidacion,
   sugerenciasEfectivo,
@@ -48,6 +59,8 @@ export interface InfoLiquidacionVenta {
   total: number;
   recibido: number;
   cambio: number;
+  /** SCRUM-73 — Código y comprobante del pago digital; null en los demás métodos. */
+  soportePago: SoportePago | null;
 }
 
 interface ConfirmarVentaProps {
@@ -76,6 +89,12 @@ export default function ConfirmarVenta({
   const [errores, setErrores] = useState<ErroresLiquidacion>({});
   const [errorGeneral, setErrorGeneral] = useState("");
   const [enviando, setEnviando] = useState(false);
+  // SCRUM-73 — Soporte del pago digital. Si el vendedor cambia a Efectivo, se
+  // conserva (por si fue un clic equivocado), pero no se manda con la venta.
+  const [referencia, setReferencia] = useState("");
+  const [comprobante, setComprobante] = useState<File | null>(null);
+  const [errorReferencia, setErrorReferencia] = useState<string>();
+  const conSoporte = requiereSoporte(metodoPago);
 
   const esEfectivo = metodoPago === "EFECTIVO";
   const liquidacion = calcularLiquidacion(
@@ -107,12 +126,19 @@ export default function ConfirmarVenta({
     if (enviando) return;
 
     setErrores(erroresEnVivo);
-    if (!listo || !metodoPago) return;
+    const errorRef = conSoporte ? validarReferencia(referencia) : undefined;
+    setErrorReferencia(errorRef);
+    if (!listo || !metodoPago || errorRef) return;
+
+    const soportePago: SoportePago | null = conSoporte
+      ? { referencia: normalizarReferencia(referencia), comprobante }
+      : null;
 
     setEnviando(true);
     setErrorGeneral("");
     try {
       const venta = await registrarVenta({
+        soportePago,
         metodoPago,
         idCliente: cliente?.id ?? null,
         idVendedor: cajero?.id ?? null,
@@ -130,6 +156,7 @@ export default function ConfirmarVenta({
         total: liquidacion.total,
         recibido: esEfectivo ? Number(recibidoTexto) || 0 : 0,
         cambio: esEfectivo ? liquidacion.cambio : 0,
+        soportePago,
       });
     } catch (error) {
       setErrorGeneral(mensajeErrorVenta(error));
@@ -249,6 +276,23 @@ export default function ConfirmarVenta({
         disabled={enviando}
         error={errores.metodoPago}
       />
+
+      {/* SCRUM-73 — Código de referencia y comprobante (Nequi, Daviplata, Transferencia) */}
+      {conSoporte && metodoPago && (
+        <SoportePagoDigital
+          metodo={metodoPago}
+          referencia={referencia}
+          onReferencia={(texto) => {
+            setReferencia(texto);
+            setErrorReferencia(undefined);
+            setErrorGeneral("");
+          }}
+          comprobante={comprobante}
+          onComprobante={setComprobante}
+          errorReferencia={errorReferencia}
+          disabled={enviando}
+        />
+      )}
 
       {/* 3. Liquidación */}
       <section className="space-y-3 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">

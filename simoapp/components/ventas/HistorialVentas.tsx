@@ -11,6 +11,7 @@ import DataTable, { type ColumnaTabla } from "@/components/ui/DataTable";
 import InputText from "@/components/ui/InputText";
 import { Modal } from "@/components/ui/Modal";
 import type { VentaHistorial } from "@/lib/ventas/tipos";
+import { formatoTamano } from "@/lib/ventas/soportePago";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -297,6 +298,22 @@ export default function HistorialVentas({
                 </span>
               </div>
             </div>
+
+            {/* SCRUM-73 (Camilo) — Soporte del pago digital: código y comprobante.
+                Del archivo solo se guardan el nombre y el tamaño (ver soportePago.ts). */}
+            {ventaDetalle.soportePago && (
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-800/50">
+                <span className="text-xs text-zinc-500 block">Soporte del pago</span>
+                <p className="mt-0.5 font-medium text-zinc-900 dark:text-zinc-100">
+                  Referencia: <span className="break-all font-mono">{ventaDetalle.soportePago.referencia}</span>
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
+                  {ventaDetalle.soportePago.comprobante
+                    ? `Comprobante: ${ventaDetalle.soportePago.comprobante.nombre} (${formatoTamano(ventaDetalle.soportePago.comprobante.tamano)})`
+                    : "Sin comprobante adjunto."}
+                </p>
+              </div>
+            )}
 
             {/* Lista de Artículos */}
             <div>
