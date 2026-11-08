@@ -59,6 +59,10 @@ export interface Pedido {
   /** SCRUM-59 (Camilo) — Venta en la que se convirtió el pedido ya entregado
    *  (HU-12); null = todavía no se ha convertido. */
   idVenta: number | null;
+  /** HU-10 — Líneas de producto comprometidas en el pedido. */
+  lineas?: LineaPedidoNueva[];
+  /** HU-10 — Indica si el stock de este pedido ya fue reservado (al pasar a EN_PREPARACION). */
+  stockReservado?: boolean;
 }
 
 // SCRUM-57 (Camilo) — Lo que se manda al registrar un pedido nuevo desde el

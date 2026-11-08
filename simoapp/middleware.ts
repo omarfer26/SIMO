@@ -25,6 +25,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
+  // HU-15: el log de auditoría inalterable y los reportes son para el
+  // Administrador y el Gerente; a los demás roles los devolvemos al inicio.
+  if (pathname.startsWith('/alertas') && role !== 'ADMIN' && role !== 'GERENTE') {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+
   return NextResponse.next()
 }
 

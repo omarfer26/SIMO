@@ -52,6 +52,9 @@ export const modulos: ModuloNav[] = [
     ),
   },
   {
+    // HU-15 — Alertas y Auditoría (/alertas): log de auditoría inalterable
+    // (cancelaciones y ajustes manuales de existencias) + consola de descargas
+    // de reportes en PDF/Excel/Word. Solo ADMIN y GERENTE (ver middleware.ts).
     nombre: "Alertas y Auditoría",
     href: "/alertas",
     icono: (

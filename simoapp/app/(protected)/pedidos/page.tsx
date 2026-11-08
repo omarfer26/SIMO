@@ -26,6 +26,7 @@
 // otra vez. Mismos roles que registrar pedidos (no Inventario).
 
 import { useEffect, useState } from "react";
+import { useProductos } from "@/components/catalogo/ProductosContext";
 import ConvertirPedidoEnVenta from "@/components/pedidos/ConvertirPedidoEnVenta";
 import FormularioPedido from "@/components/pedidos/FormularioPedido";
 import FiltroFechasPedidos, {
@@ -43,13 +44,14 @@ import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { leerRol } from "@/lib/auth/sesion";
 import {
+  PEDIDOS_USAN_MOCK,
   actualizarEstadoPedido,
   listarPedidos,
+  mensajeErrorCambioEstado,
   mensajeErrorPedidos,
 } from "@/lib/pedidos/pedidosService";
 import {
   NOMBRES_ESTADO,
-  TRANSICIONES_VALIDAS,
   type EstadoPedido,
   type Pedido,
   type PedidoRegistrado,
@@ -115,6 +117,7 @@ function ListaCargando() {
 }
 
 export default function PedidosPage() {
+  const { descontarStock, reponerStock, refrescarProductos } = useProductos();
   const [lista, setLista] = useState<EstadoLista>({ tipo: "cargando" });
   const [recarga, setRecarga] = useState(0);
   const [rango, setRango] = useState<RangoFechas>(RANGO_VACIO);
@@ -133,6 +136,10 @@ export default function PedidosPage() {
   const puedeRegistrar = lista.tipo === "lista" && leerRol() !== "INVENTARIO";
   // SCRUM-59 — Convertir en venta lo permiten los mismos roles (backend, SCRUM-62).
   const puedeConvertir = puedeRegistrar;
+  // HU-10 — Solo Vendedor, Gerente y Administrador mueven el ciclo de estados.
+  // Inventario consulta los pedidos (los necesita para alistar) pero no los
+  // avanza ni los cancela: el backend le responde 403.
+  const puedeGestionar = puedeRegistrar;
 
   const pedidosFiltrados =
     lista.tipo === "lista" ? filtrarPorFechas(lista.pedidos, rango) : [];
@@ -151,29 +158,80 @@ export default function PedidosPage() {
     };
   }, [recarga]);
 
-  // Manejador centralizado para cambiar estado de un pedido
-  const manejarCambiarEstado = async (idPedido: number, nuevoEstado: EstadoPedido) => {
+  // Manejador centralizado para cambiar estado de un pedido (HU-10: ciclo
+  // secuencial + reserva en preparación). El motivo solo viaja al cancelar.
+  const manejarCambiarEstado = async (
+    idPedido: number,
+    nuevoEstado: EstadoPedido,
+    motivo?: string,
+  ) => {
     try {
-      await actualizarEstadoPedido(idPedido, nuevoEstado);
+      const pedidoActual =
+        lista.tipo === "lista" ? lista.pedidos.find((p) => p.id === idPedido) : null;
+      const teniaStockReservado = pedidoActual?.stockReservado === true;
 
-      // Actualizar estado local
+      const resultado = await actualizarEstadoPedido(idPedido, nuevoEstado, {
+        estadoActual: pedidoActual?.estado,
+        motivo,
+      });
+
+      // HU-10 — Con la API real el stock lo mueve la base en la misma
+      // transacción (fn_salida_pedido / fn_reverso_pedido), así que solo hay
+      // que refrescar el catálogo. El mock vive en memoria y se ajusta aquí.
+      let mensajeExtra = "";
+      if (PEDIDOS_USAN_MOCK) {
+        const lineas = pedidoActual?.lineas ?? [];
+        if (nuevoEstado === "EN_PREPARACION" && !teniaStockReservado && lineas.length > 0) {
+          descontarStock(lineas.map((l) => ({ id: l.idProducto, cantidad: l.cantidad })));
+          mensajeExtra = " · Stock reservado en inventario";
+        }
+        if (nuevoEstado === "CANCELADO" && teniaStockReservado && lineas.length > 0) {
+          reponerStock(lineas.map((l) => ({ id: l.idProducto, cantidad: l.cantidad })));
+          mensajeExtra = " · Stock restituido a inventario";
+        }
+      } else {
+        await refrescarProductos();
+        if (nuevoEstado === "EN_PREPARACION") mensajeExtra = " · Stock reservado en inventario";
+        if (nuevoEstado === "CANCELADO" && teniaStockReservado) {
+          mensajeExtra = " · Stock restituido a inventario";
+        }
+      }
+
+      const actualizado = resultado.pedidoActualizado;
+      const estadoFinal = actualizado?.estado ?? resultado.estado;
+      const reservadoFinal =
+        actualizado?.stockReservado ??
+        (nuevoEstado === "EN_PREPARACION"
+          ? true
+          : nuevoEstado === "CANCELADO"
+            ? false
+            : teniaStockReservado);
+
       setLista((prev) => {
         if (prev.tipo !== "lista") return prev;
-        const pedidosActualizados = prev.pedidos.map((p) =>
-          p.id === idPedido ? { ...p, estado: nuevoEstado } : p,
-        );
-        return { ...prev, pedidos: pedidosActualizados };
+        return {
+          ...prev,
+          pedidos: prev.pedidos.map((p) =>
+            p.id === idPedido
+              ? { ...p, estado: estadoFinal, stockReservado: reservadoFinal }
+              : p,
+          ),
+        };
       });
 
       // Actualizar modal si está abierto con ese pedido
       setPedidoSeleccionado((actual) =>
-        actual && actual.id === idPedido ? { ...actual, estado: nuevoEstado } : actual,
+        actual && actual.id === idPedido
+          ? { ...actual, estado: estadoFinal, stockReservado: reservadoFinal }
+          : actual,
       );
 
-      setAvisoExito(`Pedido #${idPedido} actualizado a "${NOMBRES_ESTADO[nuevoEstado]}".`);
+      setAvisoExito(
+        `Pedido #${idPedido} actualizado a "${NOMBRES_ESTADO[estadoFinal]}"${mensajeExtra}.`,
+      );
       setTimeout(() => setAvisoExito(null), 4000);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Error al actualizar el estado del pedido.");
+      alert(mensajeErrorCambioEstado(err));
     }
   };
 
@@ -415,6 +473,7 @@ export default function PedidosPage() {
                 onSeleccionarPedido={(p) => setPedidoSeleccionado(p)}
                 pedidoSeleccionadoId={pedidoSeleccionado?.id}
                 onConvertirEnVenta={puedeConvertir ? abrirConversion : undefined}
+                puedeGestionar={puedeGestionar}
               />
             )}
 
@@ -520,6 +579,7 @@ export default function PedidosPage() {
             <LineaTiempoPedido
               pedido={pedidoSeleccionado}
               onCambiarEstado={manejarCambiarEstado}
+              disabled={!puedeGestionar}
             />
 
             {/* SCRUM-59 — Pedido entregado: su venta, o el botón para convertirlo */}

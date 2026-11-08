@@ -13,6 +13,7 @@ const helmet = require('helmet');
 const { sanitizarXss } = require('./src/middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
 const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
 const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
+const pedidosRoutes = require('./src/routes/pedidos.routes'); // HU-10
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -54,6 +55,7 @@ app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
 app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
 app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
+app.use('/api/orders', pedidosRoutes); // HU-10
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES

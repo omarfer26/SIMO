@@ -79,6 +79,19 @@ export interface UsoMetodoPago {
   porcentaje: number;
 }
 
+export interface ValoracionInventario {
+  /** Valorización total del inventario al costo de adquisición (precio de compra). */
+  valorTotalCosto: number;
+  /** Valorización potencial si se vendiera todo el inventario al precio de venta actual. */
+  valorTotalVenta: number;
+  /** Valorización del stock en Bodega al costo. */
+  valorBodega: number;
+  /** Valorización del stock en Almacén al costo. */
+  valorAlmacen: number;
+  /** Cantidad total de unidades físicas en inventario (Bodega + Almacén). */
+  unidadesTotales: number;
+}
+
 export interface DatosDashboard {
   rango: RangoFechas;
   granularidad: Granularidad;
@@ -86,4 +99,5 @@ export interface DatosDashboard {
   serie: PuntoSerieVentas[];
   rotacion: RotacionProducto[];
   metodosPago: UsoMetodoPago[];
+  valoracion: ValoracionInventario;
 }

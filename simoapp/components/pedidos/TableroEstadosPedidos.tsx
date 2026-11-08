@@ -31,11 +31,17 @@ const formatoFechaCorta = new Intl.DateTimeFormat("es-CO", {
 
 interface TableroEstadosPedidosProps {
   pedidos: Pedido[];
-  onCambiarEstado: (idPedido: number, nuevoEstado: EstadoPedido) => Promise<void>;
+  onCambiarEstado: (
+    idPedido: number,
+    nuevoEstado: EstadoPedido,
+    motivo?: string,
+  ) => Promise<void>;
   onSeleccionarPedido: (pedido: Pedido) => void;
   pedidoSeleccionadoId?: number | null;
   /** SCRUM-59 — Si no llega (rol sin permiso para vender), no se muestra el botón. */
   onConvertirEnVenta?: (pedido: Pedido) => void;
+  /** HU-10 — Si es false (p. ej. Inventario), no se ofrece avanzar estados. */
+  puedeGestionar?: boolean;
 }
 
 const colorColumna: Record<EstadoPedido, { badge: BadgeVariant; border: string; headerBg: string }> = {
@@ -77,6 +83,7 @@ export default function TableroEstadosPedidos({
   onSeleccionarPedido,
   pedidoSeleccionadoId,
   onConvertirEnVenta,
+  puedeGestionar = true,
 }: TableroEstadosPedidosProps) {
   const [actualizandoId, setActualizandoId] = useState<number | null>(null);
 
@@ -158,6 +165,14 @@ export default function TableroEstadosPedidos({
                           {pedido.cliente}
                         </p>
 
+                        {/* HU-10 — Indicador visual de stock reservado en EN_PREPARACION */}
+                        {pedido.stockReservado && (
+                          <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700/50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                            <span>📦</span>
+                            <span>Stock reservado</span>
+                          </p>
+                        )}
+
                         <div className="mt-2 flex items-center justify-between text-xs border-t border-zinc-100 dark:border-zinc-700/60 pt-2">
                           <span className="font-bold text-emerald-600 dark:text-emerald-400">
                             {formatoMoneda.format(pedido.total)}
@@ -168,7 +183,7 @@ export default function TableroEstadosPedidos({
                         </div>
 
                         {/* Botón rápido para avanzar al siguiente estado */}
-                        {siguienteEstado && (
+                        {siguienteEstado && puedeGestionar && (
                           <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-700/60 flex justify-end">
                             <Button
                               variant="secondary"

@@ -4,9 +4,9 @@
 //
 // CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
 //   NEXT_PUBLIC_PEDIDOS_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// ninguna rama del backend tiene todavía endpoints de pedidos (revisado el
-// 2026-10-18: solo existen las tablas, migración 004).
+// y reiniciar `npm run dev`. El backend ya expone /api/orders
+// (backend/src/routes/pedidos.routes.js, HU-10); mientras el interruptor no
+// sea "false" se sigue usando el mock para poder trabajar sin base de datos.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (ver camilo-sanchez.md, SCRUM-125):
 //   GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD
@@ -56,16 +56,21 @@ import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
 import { anexarVentaHistorial, listarVentas } from "@/lib/ventas/anulacionService";
 import { METODOS_PAGO } from "@/lib/ventas/tipos";
-import type {
-  DatosConversionVenta,
-  DatosPedidoNuevo,
-  EstadoPedido,
-  Pedido,
-  PedidoRegistrado,
-  VentaDePedido,
+import {
+  NOMBRES_ESTADO,
+  TRANSICIONES_VALIDAS,
+  type DatosConversionVenta,
+  type DatosPedidoNuevo,
+  type EstadoPedido,
+  type Pedido,
+  type PedidoRegistrado,
+  type VentaDePedido,
 } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK !== "false";
+// HU-10 — La página necesita saber si el stock lo mueve el backend (reserva
+// en preparación) o si lo simula el mock en memoria.
+export const PEDIDOS_USAN_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK !== "false";
+const USAR_MOCK = PEDIDOS_USAN_MOCK;
 
 interface FilaPedido {
   id_pedido: number;
@@ -77,6 +82,8 @@ interface FilaPedido {
   // PostgreSQL manda los NUMERIC como texto ("125000.00").
   total: string | number;
   id_venta?: number | null;
+  /** HU-10 — El stock salió del catálogo al pasar a EN_PREPARACION. */
+  stock_reservado?: boolean | null;
 }
 
 function aPedido(fila: FilaPedido): Pedido {
@@ -89,6 +96,7 @@ function aPedido(fila: FilaPedido): Pedido {
     fechaEntregaPactada: new Date(fila.fecha_entrega_pactada),
     total: Number(fila.total),
     idVenta: fila.id_venta ?? null,
+    stockReservado: fila.stock_reservado === true,
   };
 }
 
@@ -99,20 +107,92 @@ export async function listarPedidos(): Promise<Pedido[]> {
   return (data.data as FilaPedido[]).map(aPedido);
 }
 
+// HU-10 — Errores del cambio de estado, ya traducidos para la pantalla.
+export type TipoErrorCambioEstado = "datos_invalidos" | "no_existe" | "conflicto" | "sin_conexion" | "servidor";
+
+export class ErrorCambioEstadoPedido extends Error {
+  tipo: TipoErrorCambioEstado;
+
+  constructor(tipo: TipoErrorCambioEstado, mensaje: string) {
+    super(mensaje);
+    this.name = "ErrorCambioEstadoPedido";
+    this.tipo = tipo;
+  }
+}
+
+export interface OpcionesCambioEstado {
+  /** Estado actual del pedido: con él se valida la secuencia antes de llamar. */
+  estadoActual?: EstadoPedido;
+  /** Obligatorio al cancelar (CU-13 EX-2). */
+  motivo?: string;
+}
+
 export async function actualizarEstadoPedido(
   idPedido: number,
   nuevoEstado: EstadoPedido,
-): Promise<{ id: number; estado: EstadoPedido }> {
+  { estadoActual, motivo }: OpcionesCambioEstado = {},
+): Promise<{ id: number; estado: EstadoPedido; pedidoActualizado?: Pedido }> {
+  // HU-10 — La misma regla que el trigger de la base (RN-04): un paso a la
+  // vez y CANCELADO solo antes de ENTREGADO. Se valida aquí para avisar en
+  // pantalla de inmediato y porque el mock no tiene trigger que lo impida.
+  if (estadoActual !== undefined && !TRANSICIONES_VALIDAS[estadoActual].includes(nuevoEstado)) {
+    throw new ErrorCambioEstadoPedido(
+      "conflicto",
+      `Un pedido en estado "${NOMBRES_ESTADO[estadoActual]}" no puede pasar a "${NOMBRES_ESTADO[nuevoEstado]}".`,
+    );
+  }
+
+  const motivoLimpio = (motivo ?? "").trim();
+  if (nuevoEstado === "CANCELADO" && !motivoLimpio) {
+    throw new ErrorCambioEstadoPedido("datos_invalidos", "Indica el motivo de la cancelación.");
+  }
+
   if (USAR_MOCK) return actualizarEstadoPedidoMock(idPedido, nuevoEstado);
 
-  const { data } = await apiClient.patch(`/orders/${idPedido}/status`, {
-    estado: nuevoEstado,
-  });
+  try {
+    const { data } = await apiClient.patch(`/orders/${idPedido}/status`, {
+      estado: nuevoEstado,
+      // El backend solo lo exige al cancelar (CU-13 EX-2).
+      motivo: nuevoEstado === "CANCELADO" ? motivoLimpio : undefined,
+    });
 
-  return {
-    id: idPedido,
-    estado: data.estado || nuevoEstado,
-  };
+    return {
+      id: idPedido,
+      estado: (data.pedido?.estado as EstadoPedido) || nuevoEstado,
+      pedidoActualizado: data.pedido ? aPedido(data.pedido as FilaPedido) : undefined,
+    };
+  } catch (error) {
+    throw aErrorCambioEstado(error);
+  }
+}
+
+function aErrorCambioEstado(error: unknown): ErrorCambioEstadoPedido {
+  if (!isAxiosError(error)) return new ErrorCambioEstadoPedido("servidor", "Error inesperado.");
+  if (!error.response) return new ErrorCambioEstadoPedido("sin_conexion", error.message);
+  const mensaje: unknown = error.response.data?.message;
+  const texto = typeof mensaje === "string" ? mensaje : error.message;
+  if (error.response.status === 400) return new ErrorCambioEstadoPedido("datos_invalidos", texto);
+  if (error.response.status === 404) return new ErrorCambioEstadoPedido("no_existe", texto);
+  if (error.response.status === 409) return new ErrorCambioEstadoPedido("conflicto", texto);
+  return new ErrorCambioEstadoPedido("servidor", texto);
+}
+
+export function mensajeErrorCambioEstado(error: unknown): string {
+  if (!(error instanceof ErrorCambioEstadoPedido)) {
+    return "Ocurrió un error inesperado. Inténtalo de nuevo.";
+  }
+  switch (error.tipo) {
+    case "datos_invalidos":
+      return error.message || "El cambio de estado no es válido.";
+    case "no_existe":
+      return `${error.message || "El pedido ya no existe."} Recarga la página.`;
+    case "conflicto":
+      return `${error.message || "El pedido no admite ese cambio de estado."} Recarga la página para ver cómo quedó.`;
+    case "sin_conexion":
+      return "No pudimos conectar con el servidor. El pedido NO cambió; inténtalo de nuevo.";
+    case "servidor":
+      return "El servidor tuvo un problema. El pedido NO cambió; inténtalo de nuevo.";
+  }
 }
 
 type TipoErrorRegistro = "datos_invalidos" | "no_existe" | "conflicto" | "sin_conexion" | "servidor";
@@ -293,9 +373,10 @@ function obtenerPedidosMemoria(): Pedido[] {
     }
   }
 
-  // Generar desde datosMock iniciales
-  return datosMock.map(([id, cliente, registradoPor, estado, dias, hora, entrega, total]) => {
+// Generar desde datosMock iniciales con productos asignados para permitir reserva de stock (HU-10)
+  return datosMock.map(([id, cliente, registradoPor, estado, dias, hora, entrega, total], index) => {
     const fechaSolicitud = haceDias(dias, hora, (id * 7) % 60);
+    const idProductoAsignado = (index % 5) + 1; // Distribuye entre productos 1 a 5
     return {
       id,
       cliente,
@@ -305,6 +386,14 @@ function obtenerPedidosMemoria(): Pedido[] {
       fechaEntregaPactada: masDias(fechaSolicitud, entrega),
       total,
       idVenta: null,
+      lineas: [
+        {
+          idProducto: idProductoAsignado,
+          cantidad: 1,
+          precioUnitario: total,
+        },
+      ],
+      stockReservado: estado === "EN_PREPARACION" || estado === "LISTO" || estado === "ENTREGADO",
     };
   });
 }
@@ -329,7 +418,7 @@ async function listarPedidosMock(): Promise<Pedido[]> {
 async function actualizarEstadoPedidoMock(
   idPedido: number,
   nuevoEstado: EstadoPedido,
-): Promise<{ id: number; estado: EstadoPedido }> {
+): Promise<{ id: number; estado: EstadoPedido; pedidoActualizado: Pedido }> {
   await esperar(300);
   const pedidos = obtenerPedidosMemoria();
   const indice = pedidos.findIndex((p) => p.id === idPedido);
@@ -337,9 +426,16 @@ async function actualizarEstadoPedidoMock(
     throw new Error(`Pedido #${idPedido} no encontrado.`);
   }
 
-  pedidos[indice].estado = nuevoEstado;
+  const pedido = pedidos[indice];
+  pedido.estado = nuevoEstado;
+  if (nuevoEstado === "EN_PREPARACION") {
+    pedido.stockReservado = true;
+  } else if (nuevoEstado === "CANCELADO" && pedido.stockReservado) {
+    pedido.stockReservado = false;
+  }
+
   guardarPedidosMemoria(pedidos);
-  return { id: idPedido, estado: nuevoEstado };
+  return { id: idPedido, estado: nuevoEstado, pedidoActualizado: { ...pedido } };
 }
 
 // SCRUM-57 (Camilo) — Mock del registro: lo agrega a los pedidos guardados en
@@ -363,6 +459,8 @@ async function registrarPedidoMock(datos: DatosPedidoNuevo): Promise<PedidoRegis
     fechaEntregaPactada: new Date(anio, mes - 1, dia, 23, 59, 59),
     total,
     idVenta: null,
+    lineas: datos.lineas,
+    stockReservado: false,
   };
   guardarPedidosMemoria([...pedidos, pedido]);
   return { pedido, advertencia: null };

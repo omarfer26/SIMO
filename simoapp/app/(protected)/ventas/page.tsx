@@ -457,6 +457,16 @@ export default function VentasPage() {
                           Stock Disp: {stockDisponible}
                         </span>
                       </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        <span>Alm: <strong className="text-zinc-700 dark:text-zinc-300">{prod.stockAlmacen}</strong></span>
+                        <span>·</span>
+                        <span>Bod: <strong className="text-zinc-700 dark:text-zinc-300">{prod.stockBodega}</strong></span>
+                        {prod.stockAlmacen === 0 && prod.stockBodega > 0 && (
+                          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                            En Bodega
+                          </span>
+                        )}
+                      </div>
                       <h3 className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2">
                         {prod.nombre}
                       </h3>
@@ -593,6 +603,17 @@ export default function VentasPage() {
                           </p>
                         </div>
                       </div>
+
+                      {/* Indicador de deducción en cascada: Almacén vs Bodega */}
+                      {item.cantidad > item.producto.stockAlmacen && (
+                        <div className="mt-1 flex items-center gap-1.5 rounded bg-amber-50/80 px-2 py-1 text-[11px] text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                          <span>📦 Despacho cascada:</span>
+                          <strong>
+                            {Math.min(item.cantidad, item.producto.stockAlmacen)} Almacén +{" "}
+                            {item.cantidad - Math.min(item.cantidad, item.producto.stockAlmacen)} Bodega
+                          </strong>
+                        </div>
+                      )}
                     </div>
                   );
                 })

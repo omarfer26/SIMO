@@ -46,6 +46,8 @@ const ICONO_UNIDADES =
   "M20.25 7.5l-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z";
 const ICONO_ROTACION =
   "M16.023 9.348h4.992V4.356m0 4.992-3.181-3.183a8.25 8.25 0 0 0-13.803 3.7M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7";
+const ICONO_VALORACION =
+  "M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.5M4.5 21V10.5M3 21h18";
 
 const mensajeErrorHistorial =
   "No pudimos leer el historial de ventas. Revisa la conexión con el servidor e inténtalo de nuevo.";
@@ -131,13 +133,13 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-            Panel operativo
+            Panel gerencial y operativo
           </p>
           <h1 className="mt-1 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-            Dashboard Operacional
+            Dashboard Gerencial
           </h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Ventas por período, medios de pago y rotación de stock de la operación.
+            Monitoreo de ventas, rotación de mercancía y valor del inventario.
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -224,8 +226,8 @@ export default function DashboardPage() {
 
       {cargando ? (
         <div className="mt-6 space-y-6" aria-busy="true" aria-label="Cargando indicadores">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[0, 1, 2, 3].map((indice) => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {[0, 1, 2, 3, 4].map((indice) => (
               <Skeleton key={indice} className="h-32" />
             ))}
           </div>
@@ -240,10 +242,10 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Indicadores del período */}
+          {/* Indicadores del período y valoración */}
           <section
-            aria-label="Indicadores del período"
-            className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+            aria-label="Indicadores del período y valoración"
+            className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
           >
             <TarjetaMetrica
               titulo="Ingresos del período"
@@ -276,6 +278,60 @@ export default function DashboardPage() {
               tono="amber"
               detalle={`${formatoNumero.format(enReposicion)} productos en reposición`}
             />
+            <TarjetaMetrica
+              titulo="Valor del inventario"
+              valor={formatoMoneda.format(datos.valoracion.valorTotalCosto)}
+              icono={ICONO_VALORACION}
+              tono="emerald"
+              detalle={`Bodega: ${formatoMoneda.format(datos.valoracion.valorBodega)} · Almacén: ${formatoMoneda.format(datos.valoracion.valorAlmacen)}`}
+            />
+          </section>
+
+          {/* Panel Gerencial de Consolidado de Valoración de Inventario */}
+          <section
+            aria-label="Consolidado de valoración de inventario"
+            className="mt-6 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Valoración de activos
+                </p>
+                <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                  Consolidado y Valoración del Inventario
+                </h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Valoración económica total al costo de compra, proyección a precio de venta y margen bruto proyectado.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3 dark:border-zinc-800/80 dark:bg-zinc-800/50">
+                  <span className="block text-zinc-500 dark:text-zinc-400">Existencias totales:</span>
+                  <span className="mt-0.5 block text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                    {formatoNumero.format(datos.valoracion.unidadesTotales)} uds
+                  </span>
+                </div>
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3 dark:border-zinc-800/80 dark:bg-zinc-800/50">
+                  <span className="block text-zinc-500 dark:text-zinc-400">Inversión (al costo):</span>
+                  <span className="mt-0.5 block text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatoMoneda.format(datos.valoracion.valorTotalCosto)}
+                  </span>
+                </div>
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3 dark:border-zinc-800/80 dark:bg-zinc-800/50">
+                  <span className="block text-zinc-500 dark:text-zinc-400">Valor proyectado venta:</span>
+                  <span className="mt-0.5 block text-sm font-bold text-sky-600 dark:text-sky-400">
+                    {formatoMoneda.format(datos.valoracion.valorTotalVenta)}
+                  </span>
+                </div>
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3 dark:border-zinc-800/80 dark:bg-zinc-800/50">
+                  <span className="block text-zinc-500 dark:text-zinc-400">Margen proyectado:</span>
+                  <span className="mt-0.5 block text-sm font-bold text-violet-600 dark:text-violet-400">
+                    {formatoMoneda.format(Math.max(0, datos.valoracion.valorTotalVenta - datos.valoracion.valorTotalCosto))}
+                  </span>
+                </div>
+              </div>
+            </div>
           </section>
 
           {/* Ventas del período y medios de pago */}
@@ -326,9 +382,11 @@ export default function DashboardPage() {
       {/* Metodología: sin esto, un "3,21x" no dice nada. */}
       <p className="mt-6 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
         Los indicadores se calculan con las ventas completadas del historial y con el stock actual
-        del catálogo. Rotación = unidades vendidas ÷ inventario promedio, estimado como el stock
-        actual más la mitad de lo vendido en el período. La cobertura son los días que alcanza el
-        stock al ritmo de venta del período. Las ventas anuladas no suman a los ingresos.
+        del catálogo. El valor del inventario se determina al costo de adquisición (precio de compra)
+        discriminado por Bodega y Almacén, junto con la proyección potencial al precio de venta.
+        Rotación = unidades vendidas ÷ inventario promedio, estimado como el stock actual más la mitad
+        de lo vendido en el período. La cobertura son los días que alcanza el stock al ritmo de venta
+        del período. Las ventas anuladas no suman a los ingresos.
       </p>
     </main>
   );

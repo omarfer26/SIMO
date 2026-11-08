@@ -25,6 +25,7 @@ import type {
   ResumenVentas,
   RotacionProducto,
   UsoMetodoPago,
+  ValoracionInventario,
 } from "./tipos";
 
 export const PERIODOS_DASHBOARD: OpcionPeriodo[] = [
@@ -310,6 +311,36 @@ export function calcularMetodosPago(
 }
 
 // ---------------------------------------------------------------------
+// Valoración de inventario
+// ---------------------------------------------------------------------
+
+export function calcularValoracionInventario(productos: Producto[]): ValoracionInventario {
+  return productos.reduce(
+    (acc, producto) => {
+      const costo = Number(producto.precioCompra) || 0;
+      const venta = Number(producto.precioVenta) || 0;
+      const stockTotal = Number(producto.stockActual) || 0;
+      const stockBodega = Number(producto.stockBodega ?? stockTotal) || 0;
+      const stockAlmacen = Number(producto.stockAlmacen ?? 0) || 0;
+
+      acc.valorTotalCosto += stockTotal * costo;
+      acc.valorTotalVenta += stockTotal * venta;
+      acc.valorBodega += stockBodega * costo;
+      acc.valorAlmacen += stockAlmacen * costo;
+      acc.unidadesTotales += stockTotal;
+      return acc;
+    },
+    {
+      valorTotalCosto: 0,
+      valorTotalVenta: 0,
+      valorBodega: 0,
+      valorAlmacen: 0,
+      unidadesTotales: 0,
+    } satisfies ValoracionInventario,
+  );
+}
+
+// ---------------------------------------------------------------------
 // Entrada única que usa la página
 // ---------------------------------------------------------------------
 
@@ -329,5 +360,6 @@ export function calcularDashboard(entrada: {
     serie: construirSerieVentas(entrada.ventas, rango, granularidad),
     rotacion: calcularRotacionStock(entrada.productos, entrada.ventas, rango),
     metodosPago: calcularMetodosPago(entrada.ventas, rango),
+    valoracion: calcularValoracionInventario(entrada.productos),
   };
 }

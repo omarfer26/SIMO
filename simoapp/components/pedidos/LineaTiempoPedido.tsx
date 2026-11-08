@@ -19,14 +19,19 @@ import {
 
 interface LineaTiempoPedidoProps {
   pedido: Pedido;
-  onCambiarEstado: (idPedido: number, nuevoEstado: EstadoPedido) => Promise<void>;
+  onCambiarEstado: (
+    idPedido: number,
+    nuevoEstado: EstadoPedido,
+    motivo?: string,
+  ) => Promise<void>;
+  /** HU-10 — Los roles sin permiso (p. ej. Inventario) solo consultan. */
   disabled?: boolean;
 }
 
 const DESCRIPCION_ETAPA: Record<EstadoPedido, string> = {
   REGISTRADO: "Pedido tomado por el cliente y registrado en el sistema.",
   CONFIRMADO: "Pedido verificado y aprobado para surtido.",
-  EN_PREPARACION: "Mercancía siendo separada y empacada en bodega.",
+  EN_PREPARACION: "Mercancía siendo separada y empacada en bodega. Se reserva el stock del catálogo.",
   LISTO: "Listo para recogida o despacho al cliente.",
   ENTREGADO: "Pedido entregado a satisfacción al cliente.",
   CANCELADO: "El pedido fue cancelado y no continuará su curso.",
@@ -57,11 +62,11 @@ export default function LineaTiempoPedido({
   const indiceActual = CICLO_PROGRESIVO.indexOf(pedido.estado);
   const esCancelado = pedido.estado === "CANCELADO";
 
-  const manejarCambio = async (nuevoEstado: EstadoPedido) => {
+  const manejarCambio = async (nuevoEstado: EstadoPedido, motivo?: string) => {
     if (procesando || disabled) return;
     setProcesando(true);
     try {
-      await onCambiarEstado(pedido.id, nuevoEstado);
+      await onCambiarEstado(pedido.id, nuevoEstado, motivo);
     } finally {
       setProcesando(false);
     }
@@ -92,7 +97,6 @@ export default function LineaTiempoPedido({
           {CICLO_PROGRESIVO.map((estado, idx) => {
             const esPasado = !esCancelado && idx < indiceActual;
             const esActual = !esCancelado && idx === indiceActual;
-            const esFuturo = !esCancelado && idx > indiceActual;
 
             let colorCirculo = "bg-zinc-100 text-zinc-400 border-zinc-300 dark:bg-zinc-800 dark:text-zinc-500 dark:border-zinc-700";
             let colorTexto = "text-zinc-500 dark:text-zinc-400";
@@ -186,9 +190,17 @@ export default function LineaTiempoPedido({
               className="text-xs py-2 px-3"
               disabled={procesando || disabled}
               onClick={() => {
-                if (window.confirm(`¿Estás seguro de cancelar el pedido #${pedido.id}?`)) {
-                  manejarCambio("CANCELADO");
+                // CU-13 EX-2: la cancelación exige motivo escrito; queda en el
+                // historial del pedido y en la auditoría inalterable (HU-15).
+                const motivo = window.prompt(
+                  `Motivo de la cancelación del pedido #${pedido.id}:`,
+                );
+                if (motivo === null) return;
+                if (!motivo.trim()) {
+                  window.alert("El motivo es obligatorio para cancelar un pedido.");
+                  return;
                 }
+                manejarCambio("CANCELADO", motivo.trim());
               }}
             >
               Cancelar Pedido
