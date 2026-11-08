@@ -13,6 +13,7 @@ import { useProductos } from "@/components/catalogo/ProductosContext";
 import { Modal } from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import CampanaNotificaciones from "@/components/notificaciones/CampanaNotificaciones";
 import { empresaMock, usuarioMock } from "./datos.mock";
 
 function iniciales(nombre: string) {
@@ -80,7 +81,14 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
         </span>
       </Link>
 
-      <div className="relative ml-auto">
+      {/* Centro de notificaciones — Campana con los avisos sin leer. Lleva el
+          `ml-auto` que antes traía el menú de usuario: empuja los dos bloques
+          hacia la derecha y deja el logo a la izquierda. */}
+      <div className="ml-auto flex items-center">
+        <CampanaNotificaciones />
+      </div>
+
+      <div className="relative">
         <button
           type="button"
           onClick={() => setMenuUsuarioAbierto((abierto) => !abierto)}

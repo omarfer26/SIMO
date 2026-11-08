@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useProductos } from "@/components/catalogo/ProductosContext";
+import { useNotificaciones } from "@/components/notificaciones/NotificacionesContext";
+import { ACCION_VER_INVENTARIO } from "@/lib/notificaciones/mensajes";
+import type { NotificacionNueva } from "@/lib/notificaciones/tipos";
 import type { Producto } from "@/components/catalogo/tipos";
 import InputText from "@/components/ui/InputText";
 import Button from "@/components/ui/Button";
@@ -16,6 +19,13 @@ import type { ItemCanasta } from "@/lib/ventas/tipos";
 import { leerIdUsuario } from "@/lib/auth/sesion";
 import { listarUsuarios } from "@/lib/auth/authService";
 import type { UsuarioListado } from "@/lib/auth/tipos";
+import HistorialVentas from "@/components/ventas/HistorialVentas";
+import ModalAutorizarAnulacion from "@/components/ventas/ModalAutorizarAnulacion";
+import {
+  anexarVentaHistorial,
+  listarVentas,
+} from "@/lib/ventas/anulacionService";
+import type { ResultadoAnulacion, VentaHistorial } from "@/lib/ventas/tipos";
 import {
   guardarCanasta,
   leerCanastaGuardada,
@@ -38,18 +48,43 @@ function cuandoSeGuardo(fecha: Date) {
   return fecha.toDateString() === new Date().toDateString() ? `a las ${hora}` : `ayer a las ${hora}`;
 }
 
+// Centro de notificaciones — Todo aviso del POS sale con origen "pos", para no
+// repetirlo en cada llamada.
+type AvisoPos = Omit<NotificacionNueva, "origen">;
+
 export default function VentasPage() {
-  const { productos, origen, descontarStock } = useProductos();
+  const { productos, origen, descontarStock, reponerStock } = useProductos();
+  const { notificar } = useNotificaciones();
+  const [pestañaActiva, setPestañaActiva] = useState<"pos" | "historial">("pos");
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
 
+  // Historial de ventas y anulación con autorización
+  const [ventasHistorial, setVentasHistorial] = useState<VentaHistorial[]>([]);
+  const [cargandoHistorial, setCargandoHistorial] = useState(true);
+  const [ventaParaAnular, setVentaParaAnular] = useState<VentaHistorial | null>(null);
+  const [modalAnularAbierto, setModalAnularAbierto] = useState(false);
+
+  // Cargar historial de ventas
+  useEffect(() => {
+    let activo = true;
+    async function cargarHistorial() {
+      try {
+        const data = await listarVentas();
+        if (activo) setVentasHistorial(data);
+      } catch (err) {
+        console.error("Error cargando historial de ventas:", err);
+      } finally {
+        if (activo) setCargandoHistorial(false);
+      }
+    }
+    cargarHistorial();
+    return () => {
+      activo = false;
+    };
+  }, []);
+
   // SCRUM-121 (Camilo) — Persistencia de la canasta en el navegador.
-  // 1. Recuperar: apenas el catálogo termina de cargar (antes no se puede
-  //    saber qué productos siguen existiendo ni su stock), se lee la canasta
-  //    guardada y se cruza con el catálogo actual. Se hace una sola vez.
-  //    Va aquí, durante el render y no en un useEffect, igual que el patrón
-  //    "guardar el valor anterior" de Modal.tsx: así la canasta aparece en el
-  //    mismo instante en que aparecen los productos, sin un parpadeo vacío.
   const [recuperacion, setRecuperacion] = useState<"pendiente" | "lista">("pendiente");
   const [recuperada, setRecuperada] = useState<CanastaRecuperada | null>(null);
   if (recuperacion === "pendiente" && origen !== "cargando") {
@@ -62,22 +97,14 @@ export default function VentasPage() {
     }
   }
 
-  // 2. Guardar: cada vez que cambia la canasta (agregar, +, −, quitar,
-  //    confirmar la venta). Si queda vacía, se borra lo guardado. No se
-  //    guarda nada antes de recuperar, para no pisar la canasta guardada
-  //    con la lista vacía del primer instante.
+  // 2. Guardar: cada vez que cambia la canasta
   useEffect(() => {
     if (recuperacion === "lista") guardarCanasta(canasta, leerIdUsuario());
   }, [canasta, recuperacion]);
-  // SCRUM-50 (Camilo) — El aviso ahora tiene tipo: rojo para errores (como
-  // antes) y verde para "venta registrada". Y el modal de confirmación.
-  const [alerta, setAlerta] = useState<{ mensaje: string; tipo: "error" | "exito" } | null>(null);
-  const [ultimoEscaneado, setUltimoEscaneado] = useState<string | null>(null);
+
   const [confirmando, setConfirmando] = useState(false);
 
   // SCRUM-123 (Camilo) — Cliente de la venta. null = Consumidor final.
-  // `aperturasCliente` cambia el key del modal cada vez que se abre, para
-  // que arranque limpio en el buscador.
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [eligiendoCliente, setEligiendoCliente] = useState(false);
   const [aperturasCliente, setAperturasCliente] = useState(0);
@@ -97,11 +124,9 @@ export default function VentasPage() {
       try {
         const lista = await listarUsuarios();
         if (!activo) return;
-        // Solo usuarios activos (VENDEDOR, ADMIN o GERENTE que pueden operar caja)
         const activos = lista.filter((u) => u.activo);
         setCajerosDisponibles(activos);
 
-        // Preseleccionar al usuario que tiene la sesión iniciada
         const idSesion = leerIdUsuario();
         const enSesion = activos.find((u) => u.id === idSesion);
         setCajeroActual(enSesion || activos[0] || null);
@@ -122,10 +147,12 @@ export default function VentasPage() {
     setEligiendoCliente(true);
   };
 
-  const mostrarAlerta = (mensaje: string, tipo: "error" | "exito" = "error") => {
-    setAlerta({ mensaje, tipo });
-    setTimeout(() => setAlerta(null), tipo === "exito" ? 6000 : 3000);
-  };
+  // Centro de notificaciones — Antes el POS tenía un Toast propio (un useState
+  // con su setTimeout) pintado a mano en el JSX. Ahora el aviso entra a la cola
+  // global: ahí se decide cuánto dura, cómo se ve, cómo lo anuncia el lector de
+  // pantalla y si queda en la Campana. Las alertas de stock NO se disparan acá:
+  // descontarStock/reponerStock mueven el catálogo y VigilanteStockMinimo avisa.
+  const avisar = (aviso: AvisoPos) => notificar({ origen: "pos", ...aviso });
 
   // 1. Buscador Predictivo (Filtra por nombre o SKU)
   const productosFiltrados = productos.filter((p) => {
@@ -143,12 +170,19 @@ export default function VentasPage() {
   };
 
   // 2. Funciones de Canasta
-  const agregarProducto = (producto: Producto) => {
+  // Devuelve si el producto alcanzó a entrar, para no festejar un escaneo que
+  // se rechazó por falta de stock.
+  const agregarProducto = (producto: Producto): boolean => {
     const stockDisponible = getStockDisponible(producto);
 
     if (stockDisponible <= 0) {
-      mostrarAlerta(`¡Agotado! No hay más unidades disponibles de ${producto.nombre}`);
-      return;
+      avisar({
+        variante: "critico",
+        titulo: `Agotado: ${producto.nombre}`,
+        detalle: `${producto.codigo} · no quedan unidades disponibles para la canasta.`,
+        accion: ACCION_VER_INVENTARIO,
+      });
+      return false;
     }
 
     setCanasta((prev) => {
@@ -164,6 +198,7 @@ export default function VentasPage() {
 
       return [...prev, { producto, cantidad: 1 }];
     });
+    return true;
   };
 
   // Función para procesar y agregar directamente un código de barras / SKU escaneado
@@ -176,12 +211,23 @@ export default function VentasPage() {
     );
 
     if (productoEncontrado) {
-      agregarProducto(productoEncontrado);
-      setUltimoEscaneado(productoEncontrado.nombre);
-      setTimeout(() => setUltimoEscaneado(null), 2500);
+      if (agregarProducto(productoEncontrado)) {
+        avisar({
+          variante: "exito",
+          titulo: "Escaneado y agregado",
+          detalle: productoEncontrado.nombre,
+          // El lector de códigos dispara esto varias veces por minuto: dura poco
+          // a propósito, como el aviso anterior (2500 ms).
+          duracionMs: 2500,
+        });
+      }
       setBusqueda("");
     } else {
-      mostrarAlerta(`Código no encontrado: "${skuOcodigo.trim()}"`);
+      avisar({
+        variante: "critico",
+        titulo: "Código no encontrado",
+        detalle: `Ningún producto activo coincide con “${skuOcodigo.trim()}”.`,
+      });
     }
   };
 
@@ -228,20 +274,27 @@ export default function VentasPage() {
   }, [productos, canasta]);
 
   const modificarCantidad = (id: number, delta: number) => {
-    setCanasta((prev) => {
-      return prev.map((item) => {
-        if (item.producto.id === id) {
-          const nuevaCantidad = item.cantidad + delta;
-          if (nuevaCantidad > item.producto.stockActual) {
-            mostrarAlerta(`Stock insuficiente. Solo quedan ${item.producto.stockActual} en total.`);
-            return item;
-          }
-          if (nuevaCantidad < 1) return item; // Para eliminar, se usa otra función
-          return { ...item, cantidad: nuevaCantidad };
-        }
-        return item;
+    // La revisión se hace fuera del actualizador de setCanasta: notificar desde
+    // ahí dentro sería un efecto secundario en plena cuenta de React (en doble
+    // render estricto el mismo aviso saldría dos veces).
+    const item = canasta.find((linea) => linea.producto.id === id);
+    if (!item) return;
+
+    const nuevaCantidad = item.cantidad + delta;
+    if (nuevaCantidad < 1) return; // Para eliminar, se usa otra función
+
+    if (nuevaCantidad > item.producto.stockActual) {
+      avisar({
+        variante: "critico",
+        titulo: `Stock insuficiente: ${item.producto.nombre}`,
+        detalle: `Solo quedan ${item.producto.stockActual} ${item.producto.unidadMedida.toLowerCase()} en total.`,
       });
-    });
+      return;
+    }
+
+    setCanasta((prev) =>
+      prev.map((linea) => (linea.producto.id === id ? { ...linea, cantidad: nuevaCantidad } : linea)),
+    );
   };
 
   const eliminarDeCanasta = (id: number) => {
@@ -257,54 +310,105 @@ export default function VentasPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8 relative">
-      {/* Toast Notification Error/Agotado */}
-      {alerta && (
-        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
-          <div
-            role="status"
-            className={`text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border ${alerta.tipo === "exito" ? "bg-emerald-600 border-emerald-700" : "bg-red-600 border-red-700"
-              }`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              {alerta.tipo === "exito" ? (
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-              ) : (
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              )}
-            </svg>
-            <span className="font-medium text-sm">{alerta.mensaje}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Feedback de Escaneo Exitoso */}
-      {ultimoEscaneado && (
-        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
-          <div className="bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-emerald-700">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            <span className="font-medium text-sm">Escaneado y agregado: <strong>{ultimoEscaneado}</strong></span>
-          </div>
-        </div>
-      )}
-
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-            Punto de Venta (POS)
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+            {pestañaActiva === "pos" ? "Punto de Venta (POS)" : "Historial y Anulación de Ventas"}
           </h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Busca productos o escanea con el lector de código de barras USB.
+            {pestañaActiva === "pos"
+              ? "Busca productos, escanea con el lector USB o registra transacciones de caja."
+              : "Consulta transacciones registradas y autoriza la anulación de ventas con credenciales gerenciales."}
           </p>
         </div>
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 self-start sm:self-auto">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          Lector de Códigos USB Activo
+
+        {/* Pestañas de Navegación y Acceso Rápido */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+            <button
+              type="button"
+              onClick={() => setPestañaActiva("pos")}
+              className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                pestañaActiva === "pos"
+                  ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
+                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              Punto de Venta (POS)
+            </button>
+            <button
+              type="button"
+              onClick={() => setPestañaActiva("historial")}
+              className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                pestañaActiva === "historial"
+                  ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
+                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Historial y Anulaciones ({ventasHistorial.length})
+            </button>
+          </div>
+
+          {/* Botón directo de anulación desde el POS */}
+          {pestañaActiva === "pos" && (
+            <Button
+              variant="danger"
+              className="text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-xs"
+              onClick={() => {
+                const ultima = ventasHistorial.find((v) => v.estado === "COMPLETADA");
+                if (ultima) {
+                  setVentaParaAnular(ultima);
+                  setModalAnularAbierto(true);
+                } else {
+                  setPestañaActiva("historial");
+                  avisar({
+                    variante: "aviso",
+                    titulo: "No hay ventas recientes activas",
+                    detalle: "Seleccione una del historial para anularla.",
+                  });
+                }
+              }}
+              title="Anular la venta más reciente registrada en caja"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Anular Venta
+            </Button>
+          )}
+
+          {pestañaActiva === "pos" && (
+            <div className="hidden lg:inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Lector USB Activo
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+      {/* VISTA 1: HISTORIAL Y ANULACIONES */}
+      {pestañaActiva === "historial" && (
+        <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 animate-in fade-in duration-200">
+          <HistorialVentas
+            ventas={ventasHistorial}
+            cargando={cargandoHistorial}
+            onSolicitarAnulacion={(venta) => {
+              setVentaParaAnular(venta);
+              setModalAnularAbierto(true);
+            }}
+          />
+        </div>
+      )}
+
+      {/* VISTA 2: PUNTO DE VENTA (POS) */}
+      {pestañaActiva === "pos" && (
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 animate-in fade-in duration-200">
         {/* Lado Izquierdo: Buscador y Catálogo */}
         <div className="lg:col-span-7 flex flex-col gap-4">
           <InputText
@@ -353,6 +457,16 @@ export default function VentasPage() {
                           Stock Disp: {stockDisponible}
                         </span>
                       </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        <span>Alm: <strong className="text-zinc-700 dark:text-zinc-300">{prod.stockAlmacen}</strong></span>
+                        <span>·</span>
+                        <span>Bod: <strong className="text-zinc-700 dark:text-zinc-300">{prod.stockBodega}</strong></span>
+                        {prod.stockAlmacen === 0 && prod.stockBodega > 0 && (
+                          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                            En Bodega
+                          </span>
+                        )}
+                      </div>
                       <h3 className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2">
                         {prod.nombre}
                       </h3>
@@ -390,7 +504,11 @@ export default function VentasPage() {
                 cargando={cargandoCajeros}
                 onCambiarCajero={(cajero) => {
                   setCajeroActual(cajero);
-                  mostrarAlerta(`Cajero en turno: ${cajero.nombreCompleto}`, "exito");
+                  avisar({
+                    variante: "info",
+                    titulo: "Cajero en turno",
+                    detalle: cajero.nombreCompleto,
+                  });
                 }}
               />
             </div>
@@ -485,6 +603,17 @@ export default function VentasPage() {
                           </p>
                         </div>
                       </div>
+
+                      {/* Indicador de deducción en cascada: Almacén vs Bodega */}
+                      {item.cantidad > item.producto.stockAlmacen && (
+                        <div className="mt-1 flex items-center gap-1.5 rounded bg-amber-50/80 px-2 py-1 text-[11px] text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                          <span>📦 Despacho cascada:</span>
+                          <strong>
+                            {Math.min(item.cantidad, item.producto.stockAlmacen)} Almacén +{" "}
+                            {item.cantidad - Math.min(item.cantidad, item.producto.stockAlmacen)} Bodega
+                          </strong>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -546,6 +675,53 @@ export default function VentasPage() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Modal de Autorización Gerencial para Anular Venta */}
+      <ModalAutorizarAnulacion
+        venta={ventaParaAnular}
+        isOpen={modalAnularAbierto}
+        onClose={() => {
+          setModalAnularAbierto(false);
+          setVentaParaAnular(null);
+        }}
+        onAnulacionExitosa={(resultado, ventaAnulada) => {
+          // 1. Actualizar estado local del historial
+          setVentasHistorial((prev) =>
+            prev.map((v) =>
+              v.idVenta === resultado.idVenta
+                ? {
+                    ...v,
+                    estado: "ANULADA",
+                    anulacion: {
+                      fecha: resultado.fechaAnulacion,
+                      autorizadoPor: resultado.autorizadoPor.nombre,
+                      idAutorizador: resultado.autorizadoPor.id,
+                      rolAutorizador: resultado.autorizadoPor.rol,
+                      motivo: "Anulación autorizada en el POS",
+                    },
+                  }
+                : v,
+            ),
+          );
+
+          // 2. Restituir el stock al catálogo/inventario
+          reponerStock(
+            ventaAnulada.items.map((it) => ({
+              id: it.idProducto,
+              cantidad: it.cantidad,
+            })),
+          );
+
+          // El aviso de reposición no se arma acá: reponerStock ya movió el
+          // catálogo y VigilanteStockMinimo detecta la transición de cada producto.
+          avisar({
+            variante: "exito",
+            titulo: "Venta anulada",
+            detalle: resultado.mensaje,
+          });
+        }}
+      />
 
       {/* SCRUM-50 (Camilo) — Modal de confirmación de venta: método de pago,
           descuento, total y cambio. No se cierra al hacer clic afuera, para
@@ -589,13 +765,36 @@ export default function VentasPage() {
               total: info?.total ?? venta.total,
               recibido: info?.recibido ?? 0,
               cambio: info?.cambio ?? cambio,
+              referenciaPago: info?.soportePago?.referencia,
             });
 
-            mostrarAlerta(
-              `Venta #${venta.idVenta} registrada por ${formatoMoneda.format(venta.total)}.` +
-              (cambio > 0 ? ` Cambio: ${formatoMoneda.format(cambio)}.` : ""),
-              "exito",
+            // Guardar en el historial de transacciones para trazabilidad y anulación
+            const ventaGuardadaHistorial = anexarVentaHistorial(
+              venta,
+              {
+                metodoPago: info?.metodoPago ?? "EFECTIVO",
+                idCliente: clienteVendido?.id ?? null,
+                idVendedor: cajeroVendido?.id ?? null,
+                items: itemsVendidos,
+                subtotal: info?.subtotal ?? venta.total,
+                descuento: info?.descuento ?? 0,
+                impuestos: info?.impuestos ?? 0,
+                total: info?.total ?? venta.total,
+                soportePago: info?.soportePago ?? null,
+              },
+              cajeroVendido?.nombreCompleto,
+              clienteVendido?.nombre,
+              clienteVendido?.documento,
             );
+            setVentasHistorial((prev) => [ventaGuardadaHistorial, ...prev]);
+
+            avisar({
+              variante: "exito",
+              titulo: `Venta #${venta.idVenta} registrada`,
+              detalle:
+                `${formatoMoneda.format(venta.total)}` +
+                (cambio > 0 ? ` · Cambio ${formatoMoneda.format(cambio)}` : ""),
+            });
           }}
         />
       </Modal>

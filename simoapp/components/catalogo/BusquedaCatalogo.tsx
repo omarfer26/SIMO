@@ -10,6 +10,7 @@
 //    la combinación de filtros elegida.
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type {
   FiltroCategoria,
   FiltroDisponibilidad,
@@ -31,12 +32,21 @@ interface BusquedaCatalogoProps {
   productos: Producto[];
   /** SCRUM-124 (Camilo) — Si se pasa, cada tarjeta muestra "Trasladar a Almacén". */
   onTrasladar?: (producto: Producto) => void;
+  /** SCRUM-38 (Camilo) — Si se pasa, cada tarjeta muestra "Ajustar stock". */
+  onAjustar?: (producto: Producto) => void;
+  /** SCRUM-39 (Camilo) — Si se pasa, cada tarjeta muestra el enlace "Ver Kardex". */
+  hrefKardex?: (producto: Producto) => string;
 }
 
 // SCRUM-124 (Camilo) — Formato para las cantidades de Bodega y Almacén.
 const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
 
-export default function BusquedaCatalogo({ productos, onTrasladar }: BusquedaCatalogoProps) {
+export default function BusquedaCatalogo({
+  productos,
+  onTrasladar,
+  onAjustar,
+  hrefKardex,
+}: BusquedaCatalogoProps) {
   const [texto, setTexto] = useState("");
   const [categoria, setCategoria] = useState<FiltroCategoria>("todas");
   const [disponibilidad, setDisponibilidad] =
@@ -223,12 +233,23 @@ export default function BusquedaCatalogo({ productos, onTrasladar }: BusquedaCat
                   {producto.categoria} · {producto.unidadMedida}
                 </p>
 
-                {/* SCRUM-124 (Camilo) — Dónde está el stock. */}
-                <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                  Bodega <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockBodega)}</strong>
-                  {" · "}
-                  Almacén <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockAlmacen)}</strong>
-                </p>
+                {/* SCRUM-124 (Camilo) — Dónde está el stock.
+                    SCRUM-39 (Camilo) — A la derecha, el enlace al Kardex. */}
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <p className="text-zinc-600 dark:text-zinc-400">
+                    Bodega <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockBodega)}</strong>
+                    {" · "}
+                    Almacén <strong className="text-zinc-900 dark:text-zinc-100">{formatoCantidad.format(producto.stockAlmacen)}</strong>
+                  </p>
+                  {hrefKardex && (
+                    <Link
+                      href={hrefKardex(producto)}
+                      className="shrink-0 font-medium text-emerald-700 hover:underline dark:text-emerald-400"
+                    >
+                      Ver Kardex
+                    </Link>
+                  )}
+                </div>
 
                 <div className="mt-auto flex items-center justify-between pt-2">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -248,22 +269,38 @@ export default function BusquedaCatalogo({ productos, onTrasladar }: BusquedaCat
                 {/* SCRUM-124 (Camilo) — Abre el formulario de traslado. Se
                     deshabilita si no hay nada en Bodega o si el producto está
                     inactivo, y el título explica por qué. */}
-                {onTrasladar && (
-                  <button
-                    type="button"
-                    onClick={() => onTrasladar(producto)}
-                    disabled={producto.stockBodega <= 0 || producto.estado !== "Activo"}
-                    title={
-                      producto.estado !== "Activo"
-                        ? "El producto está inactivo"
-                        : producto.stockBodega <= 0
-                          ? "No hay unidades en Bodega para trasladar"
-                          : undefined
-                    }
-                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
-                  >
-                    Trasladar a Almacén
-                  </button>
+                {/* SCRUM-38 (Camilo) — Los botones de la tarjeta van en una
+                    fila (si no caben, uno debajo del otro). "Ajustar stock" nunca se deshabilita: un producto
+                    inactivo o agotado también puede necesitar corrección. */}
+                {(onTrasladar || onAjustar) && (
+                  <div className="flex flex-wrap gap-2">
+                    {onTrasladar && (
+                      <button
+                        type="button"
+                        onClick={() => onTrasladar(producto)}
+                        disabled={producto.stockBodega <= 0 || producto.estado !== "Activo"}
+                        title={
+                          producto.estado !== "Activo"
+                            ? "El producto está inactivo"
+                            : producto.stockBodega <= 0
+                              ? "No hay unidades en Bodega para trasladar"
+                              : undefined
+                        }
+                        className="flex-1 whitespace-nowrap rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors enabled:hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
+                      >
+                        Trasladar a Almacén
+                      </button>
+                    )}
+                    {onAjustar && (
+                      <button
+                        type="button"
+                        onClick={() => onAjustar(producto)}
+                        className="flex-1 whitespace-nowrap rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      >
+                        Ajustar stock
+                      </button>
+                    )}
+                  </div>
                 )}
               </li>
             );

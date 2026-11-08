@@ -50,3 +50,9 @@ simoapp/.next/
 # Despliegue: secretos y respaldos de la base de datos
 deploy/.env
 deploy/backups/
+
+# Qoder IDE: la wiki (.qoder/repowiki) y la base de conocimiento local que
+# genera el asistente. Son material de estudio de cada desarrollador, no del
+# repositorio. Los 156 archivos que ya estaban commiteados se sacaron del
+# índice con `git rm -r --cached .qoder` (siguen en el disco).
+.qoder/

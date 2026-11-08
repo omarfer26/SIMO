@@ -10,7 +10,9 @@ import { useState } from "react";
 import Link from "next/link";
 import BusquedaCatalogo from "@/components/catalogo/BusquedaCatalogo";
 import { useProductos } from "@/components/catalogo/ProductosContext";
+import FormularioAjuste from "@/components/inventario/FormularioAjuste";
 import FormularioTraslado from "@/components/inventario/FormularioTraslado";
+import { NOMBRE_UBICACION } from "@/lib/inventario/validaciones";
 import { Modal } from "@/components/ui/Modal";
 
 const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
@@ -28,6 +30,12 @@ export default function CatalogoPage() {
   const [aperturas, setAperturas] = useState(0);
   const [aviso, setAviso] = useState("");
   const productoTraslado = productos.find((p) => p.id === idTraslado);
+
+  // SCRUM-38 (Camilo) — Modal de ajuste manual de stock. Funciona igual que
+  // el de traslado (mismo truco del id y de `aperturas`).
+  const [ajustando, setAjustando] = useState(false);
+  const [idAjuste, setIdAjuste] = useState<number | null>(null);
+  const productoAjuste = productos.find((p) => p.id === idAjuste);
 
   const mostrarAviso = (mensaje: string) => {
     setAviso(mensaje);
@@ -70,7 +78,8 @@ export default function CatalogoPage() {
         </p>
       )}
 
-      {/* SCRUM-124 (Camilo) — Aviso de traslado registrado. */}
+      {/* SCRUM-124 (Camilo) — Aviso de traslado registrado.
+          SCRUM-38 (Camilo) — También se usa para el ajuste registrado. */}
       {aviso && (
         <div
           role="status"
@@ -96,6 +105,12 @@ export default function CatalogoPage() {
               setAperturas((n) => n + 1);
               setTrasladando(true);
             }}
+            hrefKardex={(producto) => `/kardex?producto=${producto.id}`}
+            onAjustar={(producto) => {
+              setIdAjuste(producto.id);
+              setAperturas((n) => n + 1);
+              setAjustando(true);
+            }}
           />
         )}
       </div>
@@ -120,6 +135,31 @@ export default function CatalogoPage() {
                 `Traslado #${traslado.idMovimiento} registrado: ${formatoCantidad.format(traslado.cantidad)} ` +
                   `de ${productoTraslado.nombre} pasaron a Almacén` +
                   (responsable ? ` (entregó ${responsable}).` : "."),
+              );
+            }}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={ajustando}
+        onClose={() => setAjustando(false)}
+        title="Ajuste manual de stock"
+        maxWidth="lg"
+        closeOnBackdropClick={false}
+      >
+        {productoAjuste && (
+          <FormularioAjuste
+            key={aperturas}
+            producto={productoAjuste}
+            onCancelar={() => setAjustando(false)}
+            onRegistrado={(ajuste) => {
+              actualizarUbicaciones(productoAjuste.id, ajuste.saldoBodega, ajuste.saldoAlmacen);
+              setAjustando(false);
+              const signo = ajuste.tipo === "AJUSTE_POSITIVO" ? "+" : "−";
+              mostrarAviso(
+                `Ajuste #${ajuste.idMovimiento} registrado: ${signo}${formatoCantidad.format(ajuste.cantidad)} ` +
+                  `de ${productoAjuste.nombre} en ${NOMBRE_UBICACION[ajuste.ubicacion]}.`,
               );
             }}
           />

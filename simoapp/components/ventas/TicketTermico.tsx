@@ -46,6 +46,8 @@ export interface DatosTicket {
   total: number;
   recibido?: number;
   cambio?: number;
+  /** SCRUM-73 (Camilo) — Código de referencia de Nequi, Daviplata o Transferencia. */
+  referenciaPago?: string;
 }
 
 interface TicketTermicoProps {
@@ -71,6 +73,7 @@ export default function TicketTermico({
     total,
     recibido = 0,
     cambio = 0,
+    referenciaPago,
   } = datos;
 
   const nombreMetodo =
@@ -339,6 +342,12 @@ export default function TicketTermico({
               <span>Medio de Pago:</span>
               <span className="font-bold uppercase">{nombreMetodo}</span>
             </div>
+            {referenciaPago && (
+              <div className="flex justify-between gap-2">
+                <span className="shrink-0">Referencia:</span>
+                <span className="break-all text-right font-bold">{referenciaPago}</span>
+              </div>
+            )}
             {metodoPago === "EFECTIVO" && recibido > 0 && (
               <>
                 <div className="flex justify-between">

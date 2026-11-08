@@ -1,37 +1,35 @@
 // src/controllers/pedidos.controller.js
-// Pedidos de clientes (HU-10, CU-12). SCRUM-81: registro y consulta.
+// HU-10 / CU-12 / CU-13: gestionar pedidos avanzando secuencialmente por
+// REGISTRADO -> CONFIRMADO -> EN_PREPARACION -> LISTO -> ENTREGADO, con
+// reserva de stock al entrar en preparación y devolución al cancelar.
 const {
-    crearPedido,
-    obtenerPedido,
     listarPedidos,
+    obtenerPedido,
+    obtenerCliente,
+    obtenerProductos,
+    registrarPedido,
     cambiarEstadoPedido,
-    obtenerComprobanteCancelacion,
-    convertirEnVenta,
-    buscarMetodoPago,
-    obtenerVentaDePedido,
-    estadoCliente,
 } = require('../repositories/pedidos.repository');
-const { existenProductos, idsPorSku } = require('../repositories/inventario.repository');
-const { aInstante } = require('../utils/fechas');
-const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../utils/numeros');
 
+const REGEX_ENTERO_POSITIVO = /^[1-9]\d*$/;
+const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const ESTADOS = ['REGISTRADO', 'CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO', 'CANCELADO'];
+const MAXIMO_LINEAS = 50;
+const MOTIVO_MAXIMO = 500;
+const DIRECCION_MAXIMA = 200;
+const OBSERVACIONES_MAXIMA = 1000;
+const ZONA_HORARIA = 'America/Bogota';
 
-// Errores de las reglas de la base (migraciones 004 y 015) -> HTTP
-const ERRORES_PEDIDO = {
+// Errores de negocio de las funciones de la BD (SQLSTATE clase SM) -> HTTP
+const ERRORES_NEGOCIO = {
+    SM001: [404, 'Not Found'],
     SM002: [409, 'Conflict'],
-    SM004: [400, 'Bad Request'],
-    SM015: [400, 'Bad Request'],
-    SM017: [409, 'Conflict'],
-    SM018: [404, 'Not Found'],
-    SM019: [409, 'Conflict'],
-    SM020: [409, 'Conflict'],
+    SM005: [401, 'Unauthorized'],
+    SM020: [404, 'Not Found'],
     SM021: [409, 'Conflict'],
-    SM022: [400, 'Bad Request'],
+    SM022: [409, 'Conflict'],
     SM023: [400, 'Bad Request'],
     SM024: [409, 'Conflict'],
-    // Transición fuera del ciclo (trigger fn_validar_transicion_pedido, 004)
-    23514: [409, 'Conflict'],
 };
 
 function badRequest(res, message) {
@@ -314,23 +312,23 @@ async function postConvertirEnVenta(req, res) {
             const [status, nombre] = negocio;
             return res.status(status).json({ error: nombre, message: `${error.message}.` });
         }
-        // Dos conversiones simultáneas: la segunda choca con ventas.id_pedido UNIQUE
-        if (error.code === '23505') {
-            return res.status(409).json({ error: 'Conflict', message: 'El pedido ya se convirtió en venta.' });
+        if (error.code === '23503') {
+            return badRequest(res, 'El cliente o alguno de los productos indicados ya no existe.');
         }
-        console.error('[POST /api/orders/:id/convert-to-sale] Error:', error);
-        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al convertir el pedido en venta.' });
+        if (error.code === '23514') {
+            return badRequest(res, `${error.message}.`);
+        }
+        console.error('[POST /api/orders] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al registrar el pedido.' });
     }
 }
 
 // =====================================================================
-// POST /api/orders/:id/cancel (SCRUM-100, CU-13, HU-11)
-// Body: { causa } (se acepta también "motivo"). Para el modal "Cancelar
-// pedido" con la causa obligatoria. Antes de ENTREGADO; si el pedido ya
-// descontó stock (EN_PREPARACION o LISTO), lo devuelve a su ubicación.
-// Responde el comprobante de reversión que queda en log_auditoria.
+// PATCH /api/orders/:id/status  (HU-10 / CU-12 / CU-13)
+// Body: { estado, motivo? }  — motivo obligatorio al cancelar.
+// Solo el siguiente estado del ciclo (o CANCELADO antes de ENTREGADO).
 // =====================================================================
-async function postCancelarPedido(req, res) {
+async function patchEstadoPedido(req, res) {
     try {
         const idUsuario = req.user?.id_usuario;
         if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
@@ -339,29 +337,57 @@ async function postCancelarPedido(req, res) {
         if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
             return badRequest(res, 'El id del pedido debe ser un entero positivo.');
         }
-        const causa = req.body?.causa ?? req.body?.motivo;
-        if (typeof causa !== 'string' || !causa.trim()) {
-            return badRequest(res, MENSAJE_SIN_CAUSA);
+        const idPedido = Number(req.params.id);
+        const body = req.body || {};
+
+        const nuevoEstado = typeof body.estado === 'string' ? body.estado.trim().toUpperCase() : '';
+        if (!ESTADOS.includes(nuevoEstado)) {
+            return badRequest(res, `El estado debe ser uno de: ${ESTADOS.join(', ')}.`);
         }
-        if (causa.length > 500) {
-            return badRequest(res, 'La causa de cancelación admite máximo 500 caracteres.');
+        if (nuevoEstado === 'REGISTRADO') {
+            return badRequest(res, 'El estado REGISTRADO solo se usa al registrar el pedido.');
         }
-        await cambiarEstadoPedido({
-            idPedido: Number(req.params.id),
-            estado: 'CANCELADO',
+
+        // CU-13 EX-2: la cancelación siempre explica el motivo.
+        let motivo = null;
+        if (nuevoEstado === 'CANCELADO') {
+            if (typeof body.motivo !== 'string' || !body.motivo.trim()) {
+                return badRequest(res, 'El motivo de la cancelación es obligatorio.');
+            }
+            motivo = body.motivo.trim();
+            if (motivo.length > MOTIVO_MAXIMO) {
+                return badRequest(res, `El motivo admite máximo ${MOTIVO_MAXIMO} caracteres.`);
+            }
+        }
+
+        const pedido = await cambiarEstadoPedido({
+            idPedido,
+            nuevoEstado,
+            motivo,
             idUsuario: Number(idUsuario),
-            motivo: causa.trim(),
         });
-        return responderCancelacion(res, Number(req.params.id));
+        if (!pedido) {
+            return res.status(404).json({ error: 'Not Found', message: `No existe el pedido con id ${idPedido}.` });
+        }
+
+        return res.status(200).json({ message: 'Estado del pedido actualizado exitosamente', pedido });
     } catch (error) {
-        const negocio = ERRORES_PEDIDO[error.code];
+        const negocio = ERRORES_NEGOCIO[error.code];
         if (negocio) {
             const [status, nombre] = negocio;
             return res.status(status).json({ error: nombre, message: `${error.message}.` });
         }
-        console.error('[POST /api/orders/:id/cancel] Error:', error);
-        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al cancelar el pedido.' });
+        // 23514: el trigger del ciclo de vida rechazó el salto o el retroceso,
+        // o se canceló sin motivo. Su mensaje ya explica la regla.
+        if (error.code === '23514') {
+            return res.status(409).json({ error: 'Conflict', message: `${error.message}.` });
+        }
+        if (error.code === '23503') {
+            return badRequest(res, 'El pedido referencia un cliente o usuario inexistente.');
+        }
+        console.error('[PATCH /api/orders/:id/status] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al cambiar el estado del pedido.' });
     }
 }
 
-module.exports = { postPedido, getPedidos, getPedido, patchEstadoPedido, postConvertirEnVenta, postCancelarPedido };
+module.exports = { getPedidos, getPedidoPorId, postPedido, patchEstadoPedido };
