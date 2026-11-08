@@ -117,6 +117,14 @@ caso('Cada rol solo accede a lo suyo (RBAC)', async () => {
 
 // --------------------------------- Logout (SCRUM-17) ---------------------------------
 
+caso('Dos sesiones del mismo usuario son independientes: cerrar una no cierra la otra', async () => {
+    const [a, b] = await Promise.all([iniciarSesion(PORT, 'gerente@simo.local'), iniciarSesion(PORT, 'gerente@simo.local')]);
+    assert.notEqual(a, b);
+    assert.equal((await peticion('/auth/logout', { metodo: 'POST', token: a })).status, 200);
+    assert.equal((await peticion('/users', { token: a })).status, 401);
+    assert.equal((await peticion('/users', { token: b })).status, 200);
+});
+
 caso('Logout invalida el token: después de cerrar sesión ya no sirve', async () => {
     const token = await iniciarSesion(PORT, 'gerente@simo.local');
     assert.equal((await peticion('/users', { token })).status, 200);
