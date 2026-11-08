@@ -18,7 +18,12 @@ db/
 │   ├── 010_sesiones.sql        tokens invalidados por cierre de sesión (SCRUM-17)
 │   ├── 011_compras.sql         compras a proveedor y sp_confirmar_compra (SCRUM-45)
 │   ├── 012_saldo_kardex.sql    fn_kardex_producto y fn_validar_kardex (SCRUM-132)
-│   └── 013_indices_ventas.sql  índices B-tree de cobertura para ventas (SCRUM-133)
+│   ├── 013_indices_ventas.sql  índices B-tree de cobertura para ventas (SCRUM-133)
+│   ├── 014_ajustes_inventario.sql fn_registrar_ajuste y orden del Kardex con concurrencia (SCRUM-42)
+│   ├── 015_pedidos.sql         total y reglas de las líneas de pedido (SCRUM-81)
+│   ├── 016_estados_pedido.sql  fn_cambiar_estado_pedido: stock al preparar y al cancelar (SCRUM-61)
+│   ├── 017_pedido_a_venta.sql  fn_convertir_pedido_en_venta, sin mover stock (SCRUM-62)
+│   └── 018_cancelacion_pedidos.sql cancelación según CU-13: mensajes y saldo reversado en auditoría (SCRUM-100)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
@@ -28,7 +33,12 @@ db/
     ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
     ├── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
     ├── 003_compras.sql           17 pruebas de compras y sp_confirmar_compra (no deja datos)
-    └── 004_saldo_kardex.sql      12 pruebas del saldo y la valorización del Kardex (no deja datos)
+    ├── 004_saldo_kardex.sql      12 pruebas del saldo y la valorización del Kardex (no deja datos)
+    ├── 005_ajustes.sql           20 pruebas de ajustes manuales y su auditoría (no deja datos)
+    ├── 006_pedidos.sql           12 pruebas de las líneas y el total de los pedidos (no deja datos)
+    ├── 007_estados_pedido.sql    17 pruebas del ciclo de estados con descuento y reverso de stock (no deja datos)
+    ├── 008_pedido_a_venta.sql    13 pruebas de la conversión de pedido entregado en venta (no deja datos)
+    └── 009_cancelacion_pedidos.sql 11 pruebas de la cancelación según CU-13 (no deja datos)
 ```
 
 ## Cómo crear la base

@@ -36,115 +36,150 @@ function badRequest(res, message) {
     return res.status(400).json({ error: 'Bad Request', message });
 }
 
-// Acepta números o texto numérico ("12.5"); rechaza vacíos, NaN e infinitos.
-function aNumero(valor) {
-    if (typeof valor === 'number') return Number.isFinite(valor) ? valor : NaN;
-    if (typeof valor === 'string' && valor.trim() !== '') return Number(valor);
-    return NaN;
-}
+// =====================================================================
+// POST /api/orders (SCRUM-81)
+// Body: { id_cliente, fecha_entrega_pactada, direccion_entrega?, observaciones?,
+//         lineas: [{ id_producto | sku, cantidad }] }
+// El pedido nace REGISTRADO; el precio de cada línea es el precio de venta
+// vigente del producto. Quien registra sale del token.
+// =====================================================================
+async function postPedido(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        const { id_cliente, fecha_entrega_pactada, direccion_entrega, observaciones, lineas } = req.body || {};
 
-// true si el número tiene más de `maximo` decimales (tolera el error binario
-// de punto flotante y la notación científica).
-function excedeDecimales(numero, maximo) {
-    const escalado = numero * 10 ** maximo;
-    return Math.abs(escalado - Math.round(escalado)) > 1e-6;
-}
+        if (!REGEX_ENTERO_POSITIVO.test(String(id_cliente ?? ''))) {
+            return badRequest(res, 'El id_cliente es obligatorio y debe ser un entero positivo.');
+        }
+        if (fecha_entrega_pactada === undefined || fecha_entrega_pactada === null || fecha_entrega_pactada === '') {
+            return badRequest(res, 'La fecha_entrega_pactada es obligatoria.');
+        }
+        // Solo fecha: se pacta para el final de ese día (hora de Colombia)
+        const entrega = aInstante(fecha_entrega_pactada, true);
+        if (!entrega) {
+            return badRequest(res, 'La fecha_entrega_pactada debe tener formato AAAA-MM-DD o fecha y hora ISO 8601.');
+        }
+        if (entrega < new Date()) {
+            return badRequest(res, 'La fecha de entrega pactada no puede estar en el pasado.');
+        }
+        for (const [campo, valor, maximo] of [['direccion_entrega', direccion_entrega, 200], ['observaciones', observaciones, 1000]]) {
+            if (valor !== undefined && valor !== null && (typeof valor !== 'string' || valor.length > maximo)) {
+                return badRequest(res, `El campo ${campo} debe ser un texto de máximo ${maximo} caracteres.`);
+            }
+        }
+        if (!Array.isArray(lineas) || lineas.length === 0 || lineas.length > 100) {
+            return badRequest(res, 'El pedido debe tener entre 1 y 100 productos.');
+        }
 
-// AAAA-MM-DD que exista de verdad (rechaza 2026-02-31 y similares).
-function esFechaValida(texto) {
-    if (typeof texto !== 'string' || !REGEX_FECHA.test(texto)) return false;
-    const [anio, mes, dia] = texto.split('-').map(Number);
-    const fecha = new Date(Date.UTC(anio, mes - 1, dia));
-    return (
-        fecha.getUTCFullYear() === anio &&
-        fecha.getUTCMonth() === mes - 1 &&
-        fecha.getUTCDate() === dia
-    );
-}
+        const skus = lineas.filter((l) => l && l.id_producto === undefined && typeof l.sku === 'string').map((l) => l.sku.trim());
+        const mapaSku = skus.length ? await idsPorSku(skus) : new Map();
+        const normalizadas = [];
+        for (const [i, linea] of lineas.entries()) {
+            const n = i + 1;
+            if (!linea || typeof linea !== 'object') return badRequest(res, `La línea ${n} no es válida.`);
+            let idProducto;
+            if (linea.id_producto !== undefined) {
+                if (!REGEX_ENTERO_POSITIVO.test(String(linea.id_producto))) return badRequest(res, `Línea ${n}: id_producto debe ser un entero positivo.`);
+                idProducto = Number(linea.id_producto);
+            } else if (typeof linea.sku === 'string' && linea.sku.trim()) {
+                idProducto = mapaSku.get(linea.sku.trim());
+                if (!idProducto) return res.status(404).json({ error: 'Not Found', message: `Línea ${n}: no existe un producto con el SKU ${linea.sku.trim()}.` });
+            } else {
+                return badRequest(res, `Línea ${n}: indique el producto con id_producto o sku.`);
+            }
+            const cantidad = aNumero(linea.cantidad);
+            if (Number.isNaN(cantidad) || cantidad <= 0) return badRequest(res, `Línea ${n}: la cantidad debe ser mayor a cero.`);
+            if (excedeDecimales(cantidad, 3) || cantidad > 999999999) return badRequest(res, `Línea ${n}: la cantidad admite máximo 3 decimales.`);
+            if (normalizadas.some((x) => x.idProducto === idProducto)) {
+                return badRequest(res, `Línea ${n}: el producto está repetido; agrupe las cantidades en una sola línea.`);
+            }
+            normalizadas.push({ idProducto, cantidad });
+        }
 
-// Día de hoy en Colombia, en formato AAAA-MM-DD, para no pactar entregas pasadas.
-function hoyEnColombia() {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: ZONA_HORARIA }).format(new Date());
-}
+        const estado = await estadoCliente(Number(id_cliente));
+        if (estado === null) {
+            return res.status(404).json({ error: 'Not Found', message: `No existe el cliente con id ${id_cliente}.` });
+        }
+        if (estado === false) {
+            return res.status(409).json({ error: 'Conflict', message: 'El cliente está inactivo.' });
+        }
+        const existentes = await existenProductos(normalizadas.map((l) => l.idProducto));
+        const faltante = normalizadas.find((l) => !existentes.has(l.idProducto));
+        if (faltante) {
+            return res.status(404).json({ error: 'Not Found', message: `El producto ${faltante.idProducto} no existe.` });
+        }
 
-// Valida y normaliza las líneas del pedido.
-function validarLineas(lineas) {
-    if (!Array.isArray(lineas) || lineas.length === 0) {
-        return { error: 'El pedido debe tener al menos una línea de producto.' };
+        const idPedido = await crearPedido({
+            idCliente: Number(id_cliente),
+            idUsuario: Number(idUsuario),
+            fechaEntregaPactada: entrega,
+            direccionEntrega: direccion_entrega?.trim() || null,
+            observaciones: observaciones?.trim() || null,
+            lineas: normalizadas,
+        });
+        const pedido = await obtenerPedido(idPedido);
+        const sinStock = pedido.lineas.filter((l) => !l.disponible).map((l) => l.sku);
+        return res.status(201).json({
+            message: 'Pedido registrado',
+            pedido,
+            // Informativo: el stock se descuenta al pasar a EN_PREPARACION
+            ...(sinStock.length ? { advertencia: `Hoy no alcanza el stock de: ${sinStock.join(', ')}.` } : {}),
+        });
+    } catch (error) {
+        const negocio = ERRORES_PEDIDO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        console.error('[POST /api/orders] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al registrar el pedido.' });
     }
-    if (lineas.length > MAXIMO_LINEAS) {
-        return { error: `El pedido admite máximo ${MAXIMO_LINEAS} líneas.` };
-    }
-
-    const normalizadas = [];
-    for (const [indice, linea] of lineas.entries()) {
-        const n = indice + 1;
-        if (!linea || typeof linea !== 'object') return { error: `La línea ${n} no es válida.` };
-        if (!REGEX_ENTERO_POSITIVO.test(String(linea.id_producto ?? ''))) {
-            return { error: `Línea ${n}: id_producto debe ser un entero positivo.` };
-        }
-        const idProducto = Number(linea.id_producto);
-        const cantidad = aNumero(linea.cantidad);
-        if (Number.isNaN(cantidad) || cantidad <= 0) {
-            return { error: `Línea ${n}: la cantidad debe ser mayor a cero.` };
-        }
-        if (excedeDecimales(cantidad, 3) || cantidad > 999999999) {
-            return { error: `Línea ${n}: la cantidad admite máximo 3 decimales.` };
-        }
-        if (normalizadas.some((l) => l.idProducto === idProducto)) {
-            return { error: `Línea ${n}: el producto está repetido; agrupa las cantidades en una sola línea.` };
-        }
-        normalizadas.push({ idProducto, cantidad });
-    }
-    return { lineas: normalizadas };
-}
-
-// Texto opcional: "" o null se guardan como NULL; valida el largo máximo.
-function textoOpcional(valor, maximo, campo) {
-    if (valor === undefined || valor === null) return { valor: null };
-    if (typeof valor !== 'string') return { error: `El campo ${campo} debe ser texto.` };
-    const limpio = valor.trim();
-    if (!limpio) return { valor: null };
-    if (limpio.length > maximo) return { error: `El campo ${campo} admite máximo ${maximo} caracteres.` };
-    return { valor: limpio };
 }
 
 // =====================================================================
-// GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD
+// GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&estado=&id_cliente=
+// Contrato de la lista del frontend (SCRUM-125): { data: [...] }
 // =====================================================================
 async function getPedidos(req, res) {
     try {
-        const { desde, hasta } = req.query;
-
-        if (desde !== undefined && !esFechaValida(desde)) {
-            return badRequest(res, "El parámetro 'desde' debe ser una fecha AAAA-MM-DD válida.");
+        const desde = aInstante(req.query.desde, false);
+        const hasta = aInstante(req.query.hasta, true);
+        if (desde === undefined || hasta === undefined) {
+            return badRequest(res, 'Los filtros desde y hasta deben tener formato AAAA-MM-DD o fecha y hora ISO 8601.');
         }
-        if (hasta !== undefined && !esFechaValida(hasta)) {
-            return badRequest(res, "El parámetro 'hasta' debe ser una fecha AAAA-MM-DD válida.");
+        if (desde && hasta && desde > hasta) {
+            return badRequest(res, 'La fecha desde no puede ser posterior a hasta.');
         }
-        if (desde !== undefined && hasta !== undefined && desde > hasta) {
-            return badRequest(res, "El rango de fechas está invertido: 'desde' no puede ser posterior a 'hasta'.");
+        let estado;
+        if (req.query.estado !== undefined) {
+            estado = String(req.query.estado).trim().toUpperCase();
+            if (!ESTADOS.includes(estado)) return badRequest(res, `El estado debe ser uno de: ${ESTADOS.join(', ')}.`);
         }
-
-        const data = await listarPedidos({ desde, hasta });
+        let idCliente;
+        if (req.query.id_cliente !== undefined) {
+            if (!REGEX_ENTERO_POSITIVO.test(String(req.query.id_cliente))) return badRequest(res, 'El id_cliente debe ser un entero positivo.');
+            idCliente = Number(req.query.id_cliente);
+        }
+        const data = await listarPedidos({ desde, hasta, estado, idCliente });
         return res.status(200).json({ data });
     } catch (error) {
         console.error('[GET /api/orders] Error:', error);
-        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al listar los pedidos.' });
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al consultar los pedidos.' });
     }
 }
 
-// =====================================================================
-// GET /api/orders/:id
-// =====================================================================
-async function getPedidoPorId(req, res) {
+// GET /api/orders/:id — pedido con sus líneas y el historial de estados
+async function getPedido(req, res) {
     try {
         if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
             return badRequest(res, 'El id del pedido debe ser un entero positivo.');
         }
         const pedido = await obtenerPedido(Number(req.params.id));
         if (!pedido) {
-            return res.status(404).json({ error: 'Not Found', message: `No existe el pedido con id ${req.params.id}.` });
+            return res.status(404).json({ error: 'Not Found', message: `No existe el pedido ${req.params.id}.` });
         }
         return res.status(200).json({ pedido });
     } catch (error) {
@@ -153,86 +188,126 @@ async function getPedidoPorId(req, res) {
     }
 }
 
+// Mensajes del caso de uso CU-13
+const MENSAJE_SIN_CAUSA = 'La causa de cancelación es obligatoria.';
+
+// Respuesta de una cancelación: pedido, estado y comprobante de reversión
+async function responderCancelacion(res, idPedido) {
+    const pedido = await obtenerPedido(idPedido);
+    const comprobante = await obtenerComprobanteCancelacion(idPedido);
+    const devolvioStock = comprobante && comprobante.reversion.length > 0;
+    return res.status(200).json({
+        message: devolvioStock ? 'Pedido cancelado e inventario devuelto' : 'Pedido cancelado',
+        id_pedido: pedido.id_pedido,
+        estado: pedido.estado,
+        comprobante,
+        pedido,
+    });
+}
+
 // =====================================================================
-// POST /api/orders  (CU-12: registrar un pedido, siempre nace REGISTRADO)
-// Body: { id_cliente, fecha_entrega_pactada: "AAAA-MM-DD",
-//         direccion_entrega?, observaciones?, lineas: [{ id_producto, cantidad }] }
-// Si hoy no alcanza el stock se devuelve `advertencia`, pero NO se impide
-// registrar: el stock se reserva al pasar a EN_PREPARACION.
+// PATCH /api/orders/:id/status (SCRUM-61, contrato del frontend SCRUM-58/125)
+// Body: { estado, motivo? }. El ciclo es REGISTRADO -> CONFIRMADO ->
+// EN_PREPARACION -> LISTO -> ENTREGADO, un paso a la vez; CANCELADO desde
+// cualquier estado antes de ENTREGADO y con motivo obligatorio.
+// Al pasar a EN_PREPARACION se descuenta el stock (Almacén y luego Bodega);
+// al cancelar un pedido que ya descontó, el stock vuelve a su ubicación.
 // =====================================================================
-async function postPedido(req, res) {
+async function patchEstadoPedido(req, res) {
     try {
         const idUsuario = req.user?.id_usuario;
         if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
             return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
         }
-
-        const body = req.body || {};
-
-        if (!REGEX_ENTERO_POSITIVO.test(String(body.id_cliente ?? ''))) {
-            return badRequest(res, 'El id_cliente debe ser un entero positivo.');
+        if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
+            return badRequest(res, 'El id del pedido debe ser un entero positivo.');
         }
-        const idCliente = Number(body.id_cliente);
-
-        // La fecha se pacta para el final del día elegido (hora de Colombia).
-        if (!esFechaValida(body.fecha_entrega_pactada)) {
-            return badRequest(res, "La fecha_entrega_pactada debe ser una fecha AAAA-MM-DD válida.");
+        const estado = typeof req.body?.estado === 'string' ? req.body.estado.trim().toUpperCase() : '';
+        if (!ESTADOS.includes(estado) || estado === 'REGISTRADO') {
+            return badRequest(res, `El estado debe ser uno de: ${ESTADOS.filter((e) => e !== 'REGISTRADO').join(', ')}.`);
         }
-        if (body.fecha_entrega_pactada < hoyEnColombia()) {
-            return badRequest(res, 'La fecha de entrega pactada no puede estar en el pasado.');
+        const motivo = req.body?.motivo;
+        if (motivo !== undefined && motivo !== null && (typeof motivo !== 'string' || motivo.length > 500)) {
+            return badRequest(res, 'El motivo debe ser un texto de máximo 500 caracteres.');
         }
-
-        const direccion = textoOpcional(body.direccion_entrega, DIRECCION_MAXIMA, 'direccion_entrega');
-        if (direccion.error) return badRequest(res, direccion.error);
-        const observaciones = textoOpcional(body.observaciones, OBSERVACIONES_MAXIMA, 'observaciones');
-        if (observaciones.error) return badRequest(res, observaciones.error);
-
-        const { lineas, error: errorLineas } = validarLineas(body.lineas);
-        if (errorLineas) return badRequest(res, errorLineas);
-
-        const clientePedido = await obtenerCliente(idCliente);
-        if (!clientePedido) {
-            return res.status(404).json({ error: 'Not Found', message: `No existe el cliente con id ${idCliente}.` });
-        }
-        if (!clientePedido.estado) {
-            return res.status(409).json({
-                error: 'Conflict',
-                message: `El cliente ${clientePedido.nombre} está inactivo: no se le pueden registrar pedidos.`,
-            });
+        if (estado === 'CANCELADO' && (typeof motivo !== 'string' || !motivo.trim())) {
+            return badRequest(res, MENSAJE_SIN_CAUSA);
         }
 
-        const productos = await obtenerProductos(lineas.map((l) => l.idProducto));
-        for (const linea of lineas) {
-            const producto = productos.get(linea.idProducto);
-            if (!producto) {
-                return res.status(404).json({ error: 'Not Found', message: `No existe el producto con id ${linea.idProducto}.` });
-            }
-            if (!producto.estado) {
-                return res.status(409).json({ error: 'Conflict', message: `El producto ${producto.nombre} está inactivo.` });
-            }
-        }
-
-        // Advertencia informativa: stock actual insuficiente para el pedido completo.
-        const faltantes = lineas
-            .map((linea) => ({ producto: productos.get(linea.idProducto), cantidad: linea.cantidad }))
-            .filter(({ producto, cantidad }) => Number(producto.stock_total) < cantidad)
-            .map(({ producto, cantidad }) => `${producto.nombre} (hay ${Number(producto.stock_total)}, se piden ${cantidad})`);
-        const advertencia = faltantes.length
-            ? `Hoy no alcanza el stock de: ${faltantes.join('; ')}. El pedido se registra igual y el stock se reserva al pasar a preparación.`
-            : null;
-
-        const pedido = await registrarPedido({
-            idCliente,
+        const resultado = await cambiarEstadoPedido({
+            idPedido: Number(req.params.id),
+            estado,
             idUsuario: Number(idUsuario),
-            fechaEntregaPactada: body.fecha_entrega_pactada,
-            direccionEntrega: direccion.valor,
-            observaciones: observaciones.valor,
-            lineas,
+            motivo: typeof motivo === 'string' ? motivo.trim() : null,
         });
-
-        return res.status(201).json({ message: 'Pedido registrado exitosamente', pedido, advertencia });
+        if (estado === 'CANCELADO') {
+            return responderCancelacion(res, resultado.id_pedido);
+        }
+        const pedido = await obtenerPedido(resultado.id_pedido);
+        return res.status(200).json({
+            message: estado === 'EN_PREPARACION' ? 'Pedido en preparación: el stock fue descontado' : 'Estado del pedido actualizado',
+            id_pedido: pedido.id_pedido,
+            estado: pedido.estado,
+            pedido,
+        });
     } catch (error) {
-        const negocio = ERRORES_NEGOCIO[error.code];
+        const negocio = ERRORES_PEDIDO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        console.error('[PATCH /api/orders/:id/status] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al cambiar el estado del pedido.' });
+    }
+}
+
+// =====================================================================
+// POST /api/orders/:id/convert-to-sale (SCRUM-62, HU-12)
+// Body: { metodo_pago: "EFECTIVO" | "NEQUI" | ... (o id_metodo_pago), descuento? }
+// Convierte un pedido ENTREGADO en venta con sus mismas líneas. No mueve
+// stock: ya se descontó al preparar el pedido. Precios con IVA incluido
+// (impuestos 0), igual que el POS.
+// =====================================================================
+async function postConvertirEnVenta(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
+            return badRequest(res, 'El id del pedido debe ser un entero positivo.');
+        }
+        const { metodo_pago, id_metodo_pago, descuento } = req.body || {};
+        let metodo = null;
+        if (typeof metodo_pago === 'string' && metodo_pago.trim()) {
+            metodo = await buscarMetodoPago({ codigo: metodo_pago.trim().toUpperCase() });
+        } else if (id_metodo_pago !== undefined && id_metodo_pago !== null) {
+            if (!REGEX_ENTERO_POSITIVO.test(String(id_metodo_pago))) return badRequest(res, 'El id_metodo_pago debe ser un entero positivo.');
+            metodo = await buscarMetodoPago({ id: Number(id_metodo_pago) });
+        } else {
+            return badRequest(res, 'Indique el método de pago (metodo_pago o id_metodo_pago).');
+        }
+        if (!metodo) {
+            return badRequest(res, 'El método de pago no existe o está inactivo.');
+        }
+        let descuentoNumero = 0;
+        if (descuento !== undefined && descuento !== null && descuento !== '') {
+            descuentoNumero = aNumero(descuento);
+            if (Number.isNaN(descuentoNumero) || descuentoNumero < 0 || excedeDecimales(descuentoNumero, 2)) {
+                return badRequest(res, 'El descuento debe ser un número no negativo con máximo 2 decimales.');
+            }
+        }
+
+        const idVenta = await convertirEnVenta({
+            idPedido: Number(req.params.id),
+            idUsuario: Number(idUsuario),
+            idMetodoPago: metodo.id_metodo_pago,
+            descuento: descuentoNumero,
+        });
+        const venta = await obtenerVentaDePedido(idVenta);
+        return res.status(201).json({ message: `Pedido ${req.params.id} convertido en la venta ${idVenta}`, venta });
+    } catch (error) {
+        const negocio = ERRORES_PEDIDO[error.code];
         if (negocio) {
             const [status, nombre] = negocio;
             return res.status(status).json({ error: nombre, message: `${error.message}.` });

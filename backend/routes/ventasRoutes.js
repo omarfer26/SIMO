@@ -19,11 +19,10 @@ router.post('/', verificarToken, verificarRol(1, 4), async (req, res) => {
         return res.status(400).json({ error: "Bad Request", message: "La venta debe incluir al menos un producto." });
     }
 
-    // Solicitamos un cliente dedicado del pool para manejar la transacción de forma segura
     const client = await pool.connect();
 
     try {
-        await client.query('BEGIN'); // Iniciar transacción
+        await client.query('BEGIN');
 
         // 1. Obtener ID del método de pago
         let id_metodo_pago = 1;
@@ -60,13 +59,17 @@ router.post('/', verificarToken, verificarRol(1, 4), async (req, res) => {
             );
 
             if (productoRes.rowCount === 0) {
-                throw new Error(`El producto con ID ${item.id_producto} no existe.`);
+                const error = new Error(`El producto con ID ${item.id_producto} no existe.`);
+                error.statusCode = 404;
+                throw error;
             }
 
             const producto = productoRes.rows[0];
 
-            if (producto.estado === false) {
-                throw new Error(`El producto ${producto.nombre} se encuentra inactivo.`);
+            if (producto.stock < item.cantidad) {
+                const error = new Error(`Stock insuficiente para el producto: ${producto.nombre}. Stock actual: ${producto.stock}`);
+                error.statusCode = 400;
+                throw error;
             }
 
             const stockBodega = parseFloat(producto.stock_bodega || 0);
@@ -176,10 +179,11 @@ router.post('/', verificarToken, verificarRol(1, 4), async (req, res) => {
             }
         }
 
-        await client.query('COMMIT'); // Confirmar transacción
+        await client.query('COMMIT');
 
         res.status(201).json({
-            message: "Venta procesada exitosamente con deducción en cascada",
+            status: "success",
+            message: "Venta procesada exitosamente",
             venta: {
                 id_venta,
                 fecha_venta,
@@ -201,50 +205,97 @@ router.post('/', verificarToken, verificarRol(1, 4), async (req, res) => {
         });
 
     } catch (error) {
-        await client.query('ROLLBACK'); // Revertir todo si hay error (ej. falta de stock)
-        console.error('Error al procesar la venta:', error);
-
-        // Determinar si es un error de validación nuestro o un error interno del servidor
-        const statusCode = error.message.includes('Stock insuficiente') || error.message.includes('no existe') ? 400 : 500;
-        res.status(statusCode).json({ error: "Error procesando la venta", message: error.message });
+        await client.query('ROLLBACK');
+        next(error);
     } finally {
-        client.release(); // Liberar el cliente de vuelta al pool
+        client.release();
     }
 });
 
+// =====================================================================
 // GET /api/sales/daily-summary - Resumen diario para arqueo de caja
-router.get('/daily-summary', verificarToken, verificarRol(1, 2), async (req, res) => {
+// =====================================================================
+router.get('/daily-summary', verificarToken, verificarRol(1, 2), async (req, res, next) => {
     try {
-        // Consultar ventas solo de la fecha actual y agruparlas por método de pago
         const query = `
             SELECT 
                 metodo_pago, 
                 COUNT(id_venta) as cantidad_transacciones, 
                 SUM(total) as total_ingresos 
             FROM ventas 
-            WHERE DATE(fecha_venta) = CURRENT_DATE
+            WHERE DATE(fecha_venta) = CURRENT_DATE AND estado != 'anulada'
             GROUP BY metodo_pago
             ORDER BY total_ingresos DESC;
         `;
 
         const { rows } = await pool.query(query);
-
-        // Sumar todos los grupos para obtener el gran total del día en caja
         const granTotal = rows.reduce((acc, row) => acc + parseFloat(row.total_ingresos), 0);
 
         res.status(200).json({
+            status: "success",
             mensaje: "Resumen diario generado exitosamente",
-            fecha: new Date().toISOString().split('T')[0], // Retorna YYYY-MM-DD
+            fecha: new Date().toISOString().split('T')[0],
             resumen: rows,
             gran_total: granTotal
         });
 
     } catch (error) {
-        console.error('Error al generar arqueo de caja:', error);
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Error al generar el resumen diario de ventas."
+        next(error);
+    }
+});
+
+// =====================================================================
+// PUT /api/sales/:id/cancel - Anular venta y revertir stock (SCRUM-97)
+// =====================================================================
+router.put('/:id/cancel', verificarToken, verificarRol(1, 2), async (req, res, next) => {
+    const id_venta = req.params.id;
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // 1. Verificar que la venta exista, no esté anulada y bloquear la fila
+        const ventaRes = await client.query('SELECT estado FROM ventas WHERE id_venta = $1 FOR UPDATE', [id_venta]);
+
+        if (ventaRes.rowCount === 0) {
+            const error = new Error(`La venta con ID ${id_venta} no existe.`);
+            error.statusCode = 404;
+            throw error;
+        }
+
+        if (ventaRes.rows[0].estado === 'anulada') {
+            const error = new Error('Esta venta ya se encuentra anulada previamente.');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        // 2. Extraer los productos y cantidades exactas
+        const detallesQuery = 'SELECT id_producto, cantidad FROM detalles_venta WHERE id_venta = $1';
+        const detallesRes = await client.query(detallesQuery, [id_venta]);
+
+        // 3. Devolver el stock iterando sobre los detalles
+        for (const item of detallesRes.rows) {
+            await client.query(
+                'UPDATE productos SET stock = stock + $1 WHERE id_producto = $2',
+                [item.cantidad, item.id_producto]
+            );
+        }
+
+        // 4. Marcar la venta como anulada
+        await client.query("UPDATE ventas SET estado = 'anulada' WHERE id_venta = $1", [id_venta]);
+
+        await client.query('COMMIT');
+
+        res.status(200).json({
+            status: "success",
+            message: `La venta #${id_venta} ha sido anulada exitosamente y el stock fue restaurado.`
         });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        next(error);
+    } finally {
+        client.release();
     }
 });
 

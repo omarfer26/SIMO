@@ -70,18 +70,59 @@ async function stockDe(idProducto) {
     return rows[0];
 }
 
-async function movimientosDe(idPedido) {
+// Registra un pedido de un solo producto y devuelve su id
+async function pedidoDe(producto, cantidad) {
+    const { status, body } = await registrar({ ...pedidoValido(), lineas: [{ id_producto: producto.id_producto, cantidad }] });
+    assert.equal(status, 201);
+    return body.pedido.id_pedido;
+}
+
+// Fecha en Colombia (UTC-5), formato AAAA-MM-DD
+const diaColombia = (desplazamientoDias = 0) =>
+    new Date(Date.now() - 5 * 3600e3 + desplazamientoDias * 86400e3).toISOString().slice(0, 10);
+
+async function crearProducto(sufijo, unidad, precioVenta, estado = true) {
     const { rows } = await pool.query(
-        `SELECT tipo_movimiento, ubicacion_origen, ubicacion_destino, cantidad
-         FROM movimientos_inventario WHERE id_pedido = $1 ORDER BY id_movimiento`,
-        [idPedido]
+        `INSERT INTO productos (id_categoria, id_unidad, sku, nombre, precio_compra, precio_venta, estado)
+         SELECT (SELECT min(id_categoria) FROM categorias), u.id_unidad, $1, $2, 1000, $4, $5
+         FROM unidades_medida u WHERE u.abreviatura = $3
+         RETURNING id_producto, sku`,
+        [`TEST-PED-${sufijo}-${SUFIJO}`, `Producto pedido ${sufijo}`, unidad, precioVenta, estado]
     );
-    return rows;
+    return rows[0];
 }
 
 async function preparar() {
+    const cliente = await pool.query(
+        `INSERT INTO clientes (identificacion, nombre, telefono) VALUES ($1, $2, '3001112233') RETURNING id_cliente`,
+        [`66${SUFIJO}1`, `Cliente pedidos ${SUFIJO}`]
+    );
+    ref.cliente = cliente.rows[0].id_cliente;
+    ref.clienteInactivo = (await pool.query(
+        `INSERT INTO clientes (identificacion, nombre, estado) VALUES ($1, $2, FALSE) RETURNING id_cliente`,
+        [`66${SUFIJO}2`, `Cliente inactivo ${SUFIJO}`]
+    )).rows[0].id_cliente;
+    ref.und = await crearProducto('U', 'und', 2500);
+    ref.kg = await crearProducto('K', 'kg', 4000);
+    ref.inactivo = await crearProducto('I', 'und', 2000, false);
+    ref.stock = await crearProducto('S', 'und', 3000);       // SCRUM-61: Bodega 7, Almacén 3
+    ref.disputado = await crearProducto('D', 'und', 1000);   // SCRUM-61: 10 en Bodega, para concurrencia
+    ref.cancelar = await crearProducto('C', 'und', 2000);    // SCRUM-100: Bodega 7, Almacén 3 (escenario CA-1)
+    const inventario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
+    await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.stock.id_producto, inventario]);
+    await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.disputado.id_producto, inventario]);
+    await pool.query(
+        `INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, ubicacion_destino, cantidad,
+                                             costo_unitario, saldo_bodega, saldo_almacen, id_usuario)
+         VALUES ($1, 'TRASLADO_INTERNO', 'BODEGA', 'ALMACEN', 3, 1000, 7, 3, $2)`, [ref.stock.id_producto, inventario]);
+    await pool.query('UPDATE productos SET stock_bodega = 7, stock_almacen = 3 WHERE id_producto = $1', [ref.stock.id_producto]);
+    await pool.query('SELECT fn_registrar_ingreso_bodega($1, 10, $2)', [ref.cancelar.id_producto, inventario]);
+    await pool.query(
+        `INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, ubicacion_destino, cantidad,
+                                             costo_unitario, saldo_bodega, saldo_almacen, id_usuario)
+         VALUES ($1, 'TRASLADO_INTERNO', 'BODEGA', 'ALMACEN', 3, 1000, 7, 3, $2)`, [ref.cancelar.id_producto, inventario]);
+    await pool.query('UPDATE productos SET stock_bodega = 7, stock_almacen = 3 WHERE id_producto = $1', [ref.cancelar.id_producto]);
     ref.vendedor = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'vendedor'`)).rows[0].id_usuario;
-    ref.inventario = (await pool.query(`SELECT id_usuario FROM usuarios WHERE usuario = 'inventario'`)).rows[0].id_usuario;
 
     servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
         env: { ...process.env, PORT: String(PORT) },

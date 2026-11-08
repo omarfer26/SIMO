@@ -2,12 +2,20 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('node:crypto');
 const JWT = require('./src/config/jwt'); // clave y expiración compartidas con el middleware
 const pool = require('./db');
 const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
 const ventasRoutes = require('./routes/ventasRoutes');
+const errorHandler = require('./middleware/errorHandler');
+// DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
+// está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
+// backend/limpiarReservas.js (no en cron/) y usa tablas (reservas_stock,
+// detalles_reserva) y la columna productos.stock que no existen en el esquema.
+// Volver a activar estas líneas cuando la función de reservas esté lista.
+// const reservasRoutes = require('./routes/reservasRoutes');
+// const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
 
-// Módulos de seguridad (SCRUM-127)
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { sanitizarXss } = require('./src/middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
@@ -45,6 +53,10 @@ const limiter = rateLimit({
     }
 });
 
+// Tus enrutadores actuales
+app.use('/api/sales', ventasRoutes);
+app.use('/api/users', usuariosRoutes);
+
 // Aplicar el limitador a todas las rutas de la API
 app.use('/api', limiter);
 
@@ -53,9 +65,10 @@ app.use('/api', limiter);
 // =====================================================================
 app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
+// app.use('/api/reservations', reservasRoutes); // DESACTIVADO, ver arriba
 app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
 app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
-app.use('/api/orders', pedidosRoutes); // HU-10
+app.use('/api/orders', pedidosRoutes); // SCRUM-81 / HU-10
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
@@ -400,7 +413,9 @@ app.post('/api/auth/login', async (req, res) => {
             rol: usuario.rol
         };
 
-        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION });
+        // jwtid único: sin él, dos inicios de sesión del mismo usuario en el mismo
+        // segundo daban el mismo token, y cerrar uno invalidaba también el otro.
+        const token = jwt.sign(tokenPayload, JWT.SECRETO, { expiresIn: JWT.EXPIRACION, jwtid: randomUUID() });
 
         await pool.query('UPDATE usuarios SET ultimo_acceso = now() WHERE id_usuario = $1', [usuario.id_usuario]);
 
@@ -470,9 +485,20 @@ app.post('/api/auth/logout', async (req, res) => {
     }
 });
 
-// =====================================================================
-// INICIALIZACIÓN DEL SERVIDOR
-// =====================================================================
-app.listen(port, '0.0.0.0', () => {
-    console.log(`Servidor de inventario corriendo en http://0.0.0.0:${port}`);
+// 1. Capturador para rutas inexistentes (Error 404)
+// (Camilo, 2026-10-20) — Sin '*': en Express 5 app.use('*', ...) tumba la API
+// al arrancar ("Missing parameter name"). Sin ruta, app.use ya atrapa todo.
+app.use((req, res, next) => {
+    const error = new Error(`La ruta solicitada no existe: ${req.originalUrl}`);
+    error.statusCode = 404;
+    next(error); // Pasa el error al middleware global
+});
+
+// 2. Middleware Global de Manejo de Errores (DEBE SER EL ÚLTIMO app.use)
+app.use(errorHandler);
+// Iniciar procesos en segundo plano
+// iniciarLimpiezaDeReservas(); // DESACTIVADO, ver arriba
+
+app.listen(port, () => {
+    console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
 });

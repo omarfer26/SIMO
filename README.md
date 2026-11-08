@@ -219,6 +219,117 @@ Errores: `400` datos inválidos (p. ej. "La cantidad ingresada debe ser mayor a 
 - Errores: `400` datos inválidos o producto repetido, `404` producto o compra inexistente, `409` producto inactivo.
 - Una compra confirmada no se puede modificar (lo impide la base de datos).
 
+### 🔧 Ajustes manuales de stock (SCRUM-42)
+
+> Protegido con JWT; roles `INVENTARIO` / `ADMIN`. Contrato del formulario del frontend (SCRUM-38).
+
+`POST /api/inventory/adjustments` (alias `/api/inventory/adjust`) corrige el stock de **una** ubicación por mermas, daños o sobrantes de conteo:
+
+```json
+{ "id_producto": 1, "tipo_movimiento": "AJUSTE_NEGATIVO", "ubicacion": "ALMACEN", "cantidad": 3, "motivo": "3 unidades llegaron con la caja rota" }
+```
+
+Responde `201`:
+
+```json
+{ "message": "Ajuste registrado",
+  "ajuste": { "id_movimiento": 123, "fecha_movimiento": "...", "tipo_movimiento": "AJUSTE_NEGATIVO", "ubicacion": "ALMACEN",
+              "cantidad": "3.000", "saldo_bodega": "8.000", "saldo_almacen": "1.000", "costo_unitario": "...", "motivo": "...", "id_usuario": 3, "id_producto": 1 } }
+```
+
+- `motivo` es obligatorio (se acepta también `justificacion`); el responsable sale del token.
+- Opcional `costo_unitario` (si no, se usa el precio de compra del producto).
+- La función `fn_registrar_ajuste` (migración 014) bloquea el producto, cambia el stock, deja el movimiento en el Kardex y el registro `AJUSTE_INVENTARIO` en `log_auditoria`, todo o nada.
+- Errores: `400` dato inválido o motivo vacío, `404` producto inexistente, `409` stock insuficiente en esa ubicación o producto inactivo.
+
+### 📒 Kardex de un producto (SCRUM-43)
+
+> Protegido con JWT; roles `INVENTARIO` / `ADMIN` / `GERENTE` (el Vendedor no ve costos). Contrato de la tabla del frontend (SCRUM-39).
+
+`GET /api/inventory/kardex/:id_producto` devuelve el historial **completo y en orden cronológico**, con los saldos y la valorización que recalcula `fn_kardex_producto` (migración 012):
+
+```json
+{ "producto": { "id_producto": 1, "sku": "ELEC-001", "nombre": "...", "unidad": "und", "stock_bodega": "8.000", "stock_almacen": "4.000",
+                "stock_total": "12.000", "valor_inventario": "717619.20", "consistente": true },
+  "movimientos": [ { "id_movimiento": 101, "fecha_movimiento": "...", "tipo_movimiento": "SALIDA_VENTA",
+                     "entrada_bodega": "0", "salida_bodega": "0", "entrada_almacen": "0", "salida_almacen": "3.000",
+                     "saldo_bodega": "8.000", "saldo_almacen": "4.000", "saldo_total": "12.000",
+                     "costo_unitario": "59801.60", "costo_promedio": "59801.60", "saldo_valorizado": "717619.20",
+                     "saldo_coincide": true, "documento_referencia": null, "motivo": null,
+                     "id_usuario": 4, "nombre_usuario": "Vendedor SIMO", "id_venta": 1112, "id_pedido": null, "id_compra": null } ] }
+```
+
+- Filtros opcionales `?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (inclusivos, hora de Colombia) o fecha y hora ISO 8601. Filtrar no cambia los saldos: siempre se calculan desde el primer movimiento.
+- `saldo_coincide: false` marca un movimiento cuyo saldo guardado no cuadra; `producto.consistente` resume la auditoría del producto.
+- Errores: `400` id o fechas inválidas, `404` producto inexistente.
+
+### 📝 Pedidos de clientes (SCRUM-81 / HU-10)
+
+> Protegido con JWT. Registran `VENDEDOR` / `GERENTE` / `ADMIN`; consulta también `INVENTARIO`.
+
+`POST /api/orders` registra el pedido en estado `REGISTRADO`:
+
+```json
+{ "id_cliente": 1, "fecha_entrega_pactada": "2026-10-30", "direccion_entrega": "Calle 10 # 5-20", "observaciones": "En la mañana",
+  "lineas": [ { "id_producto": 1, "cantidad": 3 }, { "sku": "FERR-001", "cantidad": 1.25 } ] }
+```
+
+- Responde `201` con `{ message, pedido }`: cabecera, `lineas` (con `disponible` según el stock de hoy) e `historial` de estados.
+- El precio de cada línea es el **precio de venta vigente** del producto; el total lo calcula la base (migración 015).
+- Una fecha sin hora se pacta para el final de ese día (hora de Colombia) y no puede estar en el pasado.
+- **No descuenta stock**: eso ocurre al pasar a `EN_PREPARACION` (SCRUM-61). Si hoy no alcanza, la respuesta trae `advertencia`.
+- Errores: `400` datos inválidos o producto repetido, `404` cliente o producto inexistente, `409` cliente o producto inactivo.
+
+Consulta:
+
+- `GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&estado=&id_cliente=` → `{ data: [ { id_pedido, nombre_cliente, nombre_usuario, estado, fecha_solicitud, fecha_entrega_pactada, total, vencido, cantidad_productos, ... } ] }` (contrato de la lista del frontend, SCRUM-125), más recientes primero.
+- `GET /api/orders/:id` → `{ pedido }` con líneas e historial.
+- Desde `EN_PREPARACION` las líneas del pedido ya no se pueden modificar (lo impide la base de datos).
+
+#### Cambio de estado (SCRUM-61)
+
+`PATCH /api/orders/:id/status` (alias `/estado`), roles `VENDEDOR` / `INVENTARIO` / `GERENTE` / `ADMIN`:
+
+```json
+{ "estado": "EN_PREPARACION" }
+{ "estado": "CANCELADO", "motivo": "El cliente desistió" }
+```
+
+- Ciclo de un paso a la vez: `REGISTRADO → CONFIRMADO → EN_PREPARACION → LISTO → ENTREGADO`; `CANCELADO` desde cualquier estado antes de `ENTREGADO`, **con motivo**.
+- Al pasar a `EN_PREPARACION` se **descuenta el stock** de cada línea: primero del Almacén y luego de Bodega (RN-02), con movimientos `SALIDA_PEDIDO` en el Kardex. Si a una línea no le alcanza, no se descuenta nada y el pedido no avanza.
+- Al cancelar un pedido que ya descontó, cada cantidad vuelve a su ubicación (`REVERSO_PEDIDO`) y la cancelación queda en `log_auditoria`.
+- Responde `200` con `{ message, id_pedido, estado, pedido }` (el frontend lee `estado`).
+- Errores: `400` estado inválido o cancelación sin motivo, `404` pedido inexistente, `409` transición fuera del ciclo o stock insuficiente.
+- Todo ocurre en la función `fn_cambiar_estado_pedido` (migración 016), en una sola transacción.
+
+#### Cancelación de pedidos (SCRUM-100 / HU-11 / CU-13)
+
+`POST /api/orders/:id/cancel` (alias `/cancelar`), roles `VENDEDOR` / `GERENTE` / `ADMIN`, para el modal "Cancelar pedido":
+
+```json
+{ "causa": "El cliente ya no lo necesita" }
+```
+
+- Antes de `ENTREGADO`. Si el pedido ya descontó stock (`EN_PREPARACION` o `LISTO`), cada cantidad vuelve a su ubicación de origen (`REVERSO_PEDIDO` en el Kardex).
+- Responde `200` con `{ message, id_pedido, estado, comprobante, pedido }`. `message` es *"Pedido cancelado e inventario devuelto"* (o *"Pedido cancelado"* si no había stock que devolver) y `comprobante` = `{ fecha, nombre_usuario, causa, estado_anterior, reversion: [ { sku, ubicacion, cantidad, saldo_bodega, saldo_almacen } ] }`.
+- El comprobante sale del registro inalterable `CANCELACION_PEDIDO` de `log_auditoria` (CU-13 RB-3).
+- Errores con los mensajes del CU: `400` *"La causa de cancelación es obligatoria."* (EX-2), `409` *"No se puede cancelar un pedido ya entregado. Utilice el módulo de anulación si aplica."* (EX-1) o pedido ya cancelado, `404` pedido inexistente.
+- `PATCH /api/orders/:id/status` con `{ "estado": "CANCELADO", "motivo": "..." }` hace lo mismo y también responde el comprobante.
+
+#### Pedido entregado a venta (SCRUM-62 / HU-12)
+
+`POST /api/orders/:id/convert-to-sale` (alias `/convertir-venta`), roles `VENDEDOR` / `GERENTE` / `ADMIN`:
+
+```json
+{ "metodo_pago": "NEQUI", "descuento": 1000 }
+```
+
+- Solo para pedidos `ENTREGADO`, una sola vez. La venta toma el cliente y las líneas del pedido y queda enlazada a él.
+- **No mueve stock**: ya se descontó al pasar el pedido a `EN_PREPARACION`.
+- `metodo_pago` es el código (`EFECTIVO`, `NEQUI`, `DAVIPLATA`, `TRANSFERENCIA`, `TARJETA`, `OTRO`); también se acepta `id_metodo_pago`. Precios con IVA incluido: `impuestos = 0`, `total = subtotal − descuento`.
+- Responde `201` con `{ message, venta }` (sin costos). El pedido muestra `id_venta` en `GET /api/orders` y `GET /api/orders/:id`.
+- Errores: `400` método de pago o descuento inválido, `404` pedido inexistente, `409` pedido no entregado o ya convertido.
+
 ### 🧑‍🤝‍🧑 Gestión de clientes (SCRUM-98 / HU-09)
 
 > Pendiente de protección con JWT + roles `VENDEDOR` / `GERENTE` / `ADMIN` (SCRUM-16 / SCRUM-18).
