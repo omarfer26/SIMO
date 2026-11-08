@@ -11,6 +11,7 @@ import {
   ErrorAuth,
   type CodigoRol,
   type CredencialesLogin,
+  type DatosEdicionUsuario,
   type DatosNuevoUsuario,
   type SesionIniciada,
   type UsuarioCreado,
@@ -90,17 +91,21 @@ export async function iniciarSesionMock(
   };
 }
 
-export async function listarUsuariosMock(): Promise<UsuarioListado[]> {
-  await esperar();
-  // Se copia campo por campo para que la contraseña no salga del mock.
-  return leerUsuarios().map((u) => ({
+// Se copia campo por campo para que la contraseña no salga del mock.
+function sinPassword(u: UsuarioMock): UsuarioListado {
+  return {
     id: u.id,
     nombreCompleto: u.nombreCompleto,
     correo: u.correo,
     usuario: u.usuario,
     rol: u.rol,
     activo: u.activo,
-  }));
+  };
+}
+
+export async function listarUsuariosMock(): Promise<UsuarioListado[]> {
+  await esperar();
+  return leerUsuarios().map(sinPassword);
 }
 
 export async function crearUsuarioMock(
@@ -136,4 +141,59 @@ export async function crearUsuarioMock(
     usuario: nuevo.usuario,
     rol: nuevo.rol,
   };
+}
+
+// SCRUM-21 (Camilo) — Imita el PUT /api/users/:id que todavía no existe en
+// el backend: 404 si el usuario no está, 409 si el correo o el nombre de
+// usuario ya los tiene OTRO usuario (los suyos propios sí los puede dejar).
+export async function editarUsuarioMock(
+  id: number,
+  datos: DatosEdicionUsuario,
+): Promise<UsuarioListado> {
+  await esperar();
+  const usuarios = leerUsuarios();
+  const actual = usuarios.find((u) => u.id === id);
+  if (!actual) {
+    throw new ErrorAuth("no_encontrado", `No existe el usuario con id ${id}.`);
+  }
+
+  const correo = datos.correo.trim().toLowerCase();
+  const nombreUsuario = datos.usuario.trim();
+  const repetido = usuarios.some(
+    (u) => u.id !== id && (u.correo === correo || u.usuario === nombreUsuario),
+  );
+  if (repetido) {
+    throw new ErrorAuth(
+      "duplicado",
+      "Ya existe un usuario con ese correo o nombre de usuario.",
+    );
+  }
+
+  const editado: UsuarioMock = {
+    ...actual,
+    nombreCompleto: datos.nombreCompleto.trim(),
+    correo,
+    usuario: nombreUsuario,
+    rol: datos.rol,
+  };
+  guardarUsuarios(usuarios.map((u) => (u.id === id ? editado : u)));
+  return sinPassword(editado);
+}
+
+// SCRUM-21 (Camilo) — Imita el PATCH /api/users/:id/estado. Desactivar no
+// borra al usuario: solo hace que el login le responda "cuenta inactiva".
+export async function cambiarEstadoUsuarioMock(
+  id: number,
+  activo: boolean,
+): Promise<UsuarioListado> {
+  await esperar();
+  const usuarios = leerUsuarios();
+  const actual = usuarios.find((u) => u.id === id);
+  if (!actual) {
+    throw new ErrorAuth("no_encontrado", `No existe el usuario con id ${id}.`);
+  }
+
+  const cambiado: UsuarioMock = { ...actual, activo };
+  guardarUsuarios(usuarios.map((u) => (u.id === id ? cambiado : u)));
+  return sinPassword(cambiado);
 }

@@ -46,6 +46,12 @@ export interface UsuarioListado extends UsuarioCreado {
   activo: boolean;
 }
 
+// SCRUM-21 (Camilo) — Lo que el Administrador puede cambiar en el modal
+// "Editar usuario". La contraseña no está a propósito: cambiarla o
+// restablecerla es otro flujo (otro ticket). El estado Activo/Inactivo
+// tampoco: se cambia con su propio botón y su propia confirmación.
+export type DatosEdicionUsuario = Omit<DatosNuevoUsuario, "password">;
+
 // Tipos de error que la pantalla sabe explicarle al usuario. Tanto la API
 // real como el mock terminan lanzando uno de estos, así los formularios no
 // necesitan saber de códigos HTTP.
@@ -55,6 +61,7 @@ export type TipoErrorAuth =
   | "duplicado" // 409: correo o nombre de usuario ya registrados
   | "datos_invalidos" // 400: el backend rechazó algún campo
   | "sin_permiso" // 401/403 al crear usuario: la sesión no es de Administrador
+  | "no_encontrado" // 404 al editar: el usuario ya no existe (SCRUM-21)
   | "sin_conexion" // no hubo respuesta (servidor caído o sin internet)
   | "servidor"; // 500 o cualquier otra cosa inesperada
 

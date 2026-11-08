@@ -36,6 +36,11 @@ export interface Producto {
   precioCompra: number;
   precioVenta: number;
   stockActual: number;
+  // SCRUM-124 (Camilo) — Cuánto de stockActual está en cada ubicación
+  // (columnas stock_bodega y stock_almacen de la tabla productos). Siempre
+  // suman stockActual. La mercancía entra a Bodega y se traslada a Almacén.
+  stockBodega: number;
+  stockAlmacen: number;
   stockMinimo: number;
   estado: EstadoProducto;
 }

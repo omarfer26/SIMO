@@ -6,9 +6,9 @@ export function middleware(request: NextRequest) {
   const role = request.cookies.get('role')?.value
   const { pathname } = request.nextUrl
 
-  // Si el usuario entra a /login
-  if (pathname.startsWith('/login')) {
-    // Si ya está logueado, lo sacamos del login y lo mandamos al inicio
+  // Si el usuario entra a /login o a /recuperar-password
+  if (pathname.startsWith('/login') || pathname.startsWith('/recuperar-password')) {
+    // Si ya está logueado, lo sacamos y lo mandamos al inicio
     if (token) {
       return NextResponse.redirect(new URL('/', request.url))
     }

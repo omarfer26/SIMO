@@ -106,6 +106,15 @@ export default function LoginPage() {
             error={errores.password}
           />
 
+          <div className="flex items-center justify-end">
+            <a
+              href="/recuperar-password"
+              className="text-xs font-medium text-emerald-600 hover:text-emerald-700 hover:underline dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              ¿Olvidaste tu contraseña?
+            </a>
+          </div>
+
           <Button type="submit" className="w-full" disabled={enviando}>
             {enviando ? (
               <>
