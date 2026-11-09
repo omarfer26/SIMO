@@ -12,7 +12,8 @@
 // quien decide qué puede hacer cada uno es el token, en el backend.
 
 import { borrarCanastaGuardada } from "@/lib/ventas/canastaGuardada";
-import type { SesionIniciada } from "./tipos";
+import { esRolValido } from "./permisos";
+import type { CodigoRol, SesionIniciada } from "./tipos";
 
 // El backend firma el JWT con 8 horas de vida; la cookie dura lo mismo.
 const DURACION_SEGUNDOS = 8 * 60 * 60;
@@ -56,4 +57,12 @@ export function leerToken(): string | null {
 export function leerIdUsuario(): number | null {
   const id = Number(leerCookie("userId"));
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// SCRUM-57 (Camilo) — Rol de la sesión abierta, o null si no hay. Solo sirve
+// para esconder botones que el backend le negaría a ese rol (un 403 cierra
+// la sesión, ver apiClient.ts); quien da el permiso sigue siendo el token.
+export function leerRol(): CodigoRol | null {
+  const rol = leerCookie("role");
+  return esRolValido(rol) ? rol : null;
 }

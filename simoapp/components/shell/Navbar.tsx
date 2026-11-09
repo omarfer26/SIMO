@@ -8,11 +8,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { NOMBRE_ROL, inicioDe } from "@/lib/auth/permisos";
 import { cerrarSesion } from "@/lib/auth/sesion";
+import { useRolSesion } from "@/lib/auth/useRolSesion";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 import { Modal } from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import CampanaNotificaciones from "@/components/notificaciones/CampanaNotificaciones";
 import { empresaMock, usuarioMock } from "./datos.mock";
 
 function iniciales(nombre: string) {
@@ -32,6 +35,9 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
   const [menuUsuarioAbierto, setMenuUsuarioAbierto] = useState(false);
   const [modalLogoutAbierto, setModalLogoutAbierto] = useState(false);
   const [cerrando, setCerrando] = useState(false);
+  // El rol de la sesión sale de la cookie (null hasta hidratar); el nombre
+  // sigue viniendo del mock hasta que el perfil sea real.
+  const rol = useRolSesion();
   const { limpiarProductos } = useProductos();
 
   // Acción visual de Logout con limpieza de Storage, Context y redirección a /login
@@ -71,7 +77,7 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
         </svg>
       </button>
 
-      <Link href="/" className="flex items-center gap-2">
+      <Link href={inicioDe(rol)} className="flex items-center gap-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600 text-sm font-bold text-white">
           {empresaMock.razonSocial.charAt(0)}
         </span>
@@ -80,7 +86,14 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
         </span>
       </Link>
 
-      <div className="relative ml-auto">
+      {/* Centro de notificaciones — Campana con los avisos sin leer. Lleva el
+          `ml-auto` que antes traía el menú de usuario: empuja los dos bloques
+          hacia la derecha y deja el logo a la izquierda. */}
+      <div className="ml-auto flex items-center">
+        <CampanaNotificaciones />
+      </div>
+
+      <div className="relative">
         <button
           type="button"
           onClick={() => setMenuUsuarioAbierto((abierto) => !abierto)}
@@ -94,7 +107,7 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
               {usuarioMock.nombre}
             </span>
             <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">
-              {usuarioMock.rol}
+              {rol ? NOMBRE_ROL[rol] : usuarioMock.rol}
             </span>
           </span>
         </button>

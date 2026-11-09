@@ -47,13 +47,14 @@ export function rangoInvalido(rango: RangoFechas) {
 // rango está al revés no se filtra (el formulario ya muestra el error).
 export function filtrarPorFechas(pedidos: Pedido[], rango: RangoFechas) {
   if (!hayRango(rango) || rangoInvalido(rango)) return pedidos;
-  return pedidos.filter((pedido) => {
-    const dia = diaLocal(pedido.fechaSolicitud);
-    return (
-      (rango.desde === "" || dia >= rango.desde) &&
-      (rango.hasta === "" || dia <= rango.hasta)
-    );
-  });
+  return pedidos.filter((pedido) => fechaEnRango(pedido.fechaSolicitud, rango));
+}
+
+// SCRUM-39 (Camilo) — La comparación de un día contra el rango, sacada de
+// filtrarPorFechas para que el Kardex filtre sus movimientos igual.
+export function fechaEnRango(fecha: Date, rango: RangoFechas) {
+  const dia = diaLocal(fecha);
+  return (rango.desde === "" || dia >= rango.desde) && (rango.hasta === "" || dia <= rango.hasta);
 }
 
 // Atajos: cada uno arma su rango a partir de hoy.
@@ -89,6 +90,8 @@ interface FiltroFechasPedidosProps {
   /** Cuántos pedidos quedan después de filtrar, y cuántos hay en total. */
   mostrados: number;
   total: number;
+  /** SCRUM-39 (Camilo) — Qué se cuenta en el mensaje de abajo. Por defecto, pedidos. */
+  nombres?: { singular: string; plural: string };
 }
 
 export default function FiltroFechasPedidos({
@@ -96,6 +99,7 @@ export default function FiltroFechasPedidos({
   onCambiar,
   mostrados,
   total,
+  nombres = { singular: "pedido", plural: "pedidos" },
 }: FiltroFechasPedidosProps) {
   const hoy = diaLocal(new Date());
   const invalido = rangoInvalido(rango);
@@ -155,10 +159,10 @@ export default function FiltroFechasPedidos({
       {/* aria-live: un lector de pantalla anuncia el resultado al filtrar. */}
       <p aria-live="polite" className="text-sm text-zinc-500 dark:text-zinc-400">
         {invalido
-          ? `Corrige las fechas para filtrar. Mientras tanto se ven los ${total} pedidos.`
+          ? `Corrige las fechas para filtrar. Mientras tanto se ven los ${total} ${nombres.plural}.`
           : filtrando
-            ? `${mostrados} de ${total} pedidos en ese período.`
-            : `${total} ${total === 1 ? "pedido" : "pedidos"} en total.`}
+            ? `${mostrados} de ${total} ${nombres.plural} en ese período.`
+            : `${total} ${total === 1 ? nombres.singular : nombres.plural} en total.`}
       </p>
     </div>
   );

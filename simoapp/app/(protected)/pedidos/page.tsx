@@ -3,8 +3,9 @@
 // SCRUM-125 (Camilo) — Página de Gestión de Pedidos. Antes solo tenía el
 // título; ahora:
 //  - Tabla con la lista de pedidos (DataTable de components/ui), del más
-//    reciente al más antiguo. Por ahora con datos de prueba: ver
-//    lib/pedidos/pedidosService.ts para pasar a la API real.
+//    reciente al más antiguo. Los datos vienen de la API real (/api/orders);
+//    el mock de lib/pedidos/pedidosService.ts queda solo si se activa
+//    NEXT_PUBLIC_PEDIDOS_MOCK=true.
 //  - Filtro por rango de fechas Desde / Hasta arriba de la tabla
 //    (components/pedidos/FiltroFechasPedidos.tsx). La tabla se actualiza
 //    apenas se elige una fecha, sin botón "Buscar". Filtra por la fecha de
@@ -12,20 +13,57 @@
 //  - Mientras carga se ven cuadros grises; si falla, el error con un botón
 //    para reintentar; si ningún pedido cae en el rango, un mensaje con el
 //    botón "Limpiar filtro".
+//
+// SCRUM-57 (Camilo) — Botón "+ Nuevo pedido" que abre el modal con el
+// formulario de registro (components/pedidos/FormularioPedido.tsx). Al
+// registrarlo, el pedido aparece de una vez en el tablero y en la tabla como
+// "Registrado". No se le muestra al Encargado de Inventario: el backend solo
+// deja registrar pedidos a Vendedor, Gerente y Administrador.
+//
+// SCRUM-59 (Camilo) — Botón "Convertir en venta" en los pedidos entregados
+// (tablero, tabla y trazabilidad), que abre el modal
+// components/pedidos/ConvertirPedidoEnVenta.tsx (HU-12). Al confirmar, el
+// pedido queda marcado con su venta ("Venta #N") y ya no se puede convertir
+// otra vez. Mismos roles que registrar pedidos (no Inventario).
 
 import { useEffect, useState } from "react";
+import { useProductos } from "@/components/catalogo/ProductosContext";
+import ConvertirPedidoEnVenta from "@/components/pedidos/ConvertirPedidoEnVenta";
+import FormularioPedido from "@/components/pedidos/FormularioPedido";
 import FiltroFechasPedidos, {
   RANGO_VACIO,
   filtrarPorFechas,
   hayRango,
   type RangoFechas,
 } from "@/components/pedidos/FiltroFechasPedidos";
+import LineaTiempoPedido from "@/components/pedidos/LineaTiempoPedido";
+import TableroEstadosPedidos from "@/components/pedidos/TableroEstadosPedidos";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import DataTable, { type ColumnaTabla } from "@/components/ui/DataTable";
+import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { listarPedidos, mensajeErrorPedidos } from "@/lib/pedidos/pedidosService";
-import { NOMBRES_ESTADO, type EstadoPedido, type Pedido } from "@/lib/pedidos/tipos";
+import {
+  estadosPermitidosPedido,
+  puedeCancelarPedido,
+  puedeConvertirPedido,
+  puedeRegistrarPedido,
+} from "@/lib/auth/permisos";
+import { leerRol } from "@/lib/auth/sesion";
+import {
+  PEDIDOS_USAN_MOCK,
+  actualizarEstadoPedido,
+  listarPedidos,
+  mensajeErrorCambioEstado,
+  mensajeErrorPedidos,
+} from "@/lib/pedidos/pedidosService";
+import {
+  NOMBRES_ESTADO,
+  type EstadoPedido,
+  type Pedido,
+  type PedidoRegistrado,
+  type VentaDePedido,
+} from "@/lib/pedidos/tipos";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -51,58 +89,6 @@ const colorEstado: Record<EstadoPedido, BadgeVariant> = {
   ENTREGADO: "success",
   CANCELADO: "danger",
 };
-
-const columnas: ColumnaTabla<Pedido>[] = [
-  {
-    key: "id",
-    header: "N.º",
-    accessor: (p) => p.id,
-    render: (p) => <span className="font-medium">#{p.id}</span>,
-    sortable: true,
-  },
-  { key: "cliente", header: "Cliente", accessor: (p) => p.cliente, sortable: true },
-  {
-    key: "fechaSolicitud",
-    header: "Fecha de solicitud",
-    accessor: (p) => p.fechaSolicitud,
-    render: (p) => (
-      <>
-        {formatoFecha.format(p.fechaSolicitud)}
-        <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">
-          {formatoHora.format(p.fechaSolicitud)}
-        </span>
-      </>
-    ),
-    sortable: true,
-  },
-  {
-    key: "fechaEntregaPactada",
-    header: "Entrega pactada",
-    accessor: (p) => p.fechaEntregaPactada,
-    render: (p) => formatoFecha.format(p.fechaEntregaPactada),
-    sortable: true,
-  },
-  {
-    key: "estado",
-    header: "Estado",
-    accessor: (p) => NOMBRES_ESTADO[p.estado],
-    render: (p) => (
-      <Badge variant={colorEstado[p.estado]} size="sm" pill>
-        {NOMBRES_ESTADO[p.estado]}
-      </Badge>
-    ),
-    sortable: true,
-  },
-  {
-    key: "total",
-    header: "Total",
-    align: "right",
-    accessor: (p) => p.total,
-    render: (p) => formatoMoneda.format(p.total),
-    sortable: true,
-  },
-  { key: "registradoPor", header: "Registrado por", accessor: (p) => p.registradoPor, sortable: true },
-];
 
 // La lista puede estar en uno de tres momentos, y solo en uno a la vez.
 type EstadoLista =
@@ -138,16 +124,38 @@ function ListaCargando() {
 }
 
 export default function PedidosPage() {
+  const { descontarStock, reponerStock, refrescarProductos } = useProductos();
   const [lista, setLista] = useState<EstadoLista>({ tipo: "cargando" });
-  // Cada vez que este número cambia, se vuelve a pedir la lista.
   const [recarga, setRecarga] = useState(0);
   const [rango, setRango] = useState<RangoFechas>(RANGO_VACIO);
+  const [vista, setVista] = useState<"tablero" | "tabla">("tablero");
+  const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null);
+  const [avisoExito, setAvisoExito] = useState<string | null>(null);
+  // SCRUM-57 — Cuántas veces se ha abierto "Nuevo pedido". Va como `key` del
+  // formulario para que cada vez arranque vacío; 0 = cerrado.
+  const [nuevoPedido, setNuevoPedido] = useState(0);
+  const [modalNuevoAbierto, setModalNuevoAbierto] = useState(false);
+  // SCRUM-59 — Pedido entregado que se está convirtiendo en venta; null = modal cerrado.
+  const [pedidoAConvertir, setPedidoAConvertir] = useState<Pedido | null>(null);
+
+  // EP-04 — La matriz de lib/auth/permisos.ts decide quién opera el ciclo: el
+  // Vendedor registra, avanza, cancela y convierte; el Encargado de Inventario
+  // solo alista (pasa a preparación y marca listo); el Administrador y el
+  // Gerente únicamente consultan. El rol está en una cookie, que en el
+  // servidor no existe, así que se lee cuando la lista ya llegó (en el
+  // navegador).
+  const rol = lista.tipo === "lista" ? leerRol() : null;
+  const puedeRegistrar = puedeRegistrarPedido(rol);
+  // SCRUM-59 — Convertir en venta es del Vendedor, igual que en el backend.
+  const puedeConvertir = puedeConvertirPedido(rol);
+  // Estados a los que este rol puede mover un pedido (vacío = solo lectura).
+  const estadosPermitidos = estadosPermitidosPedido(rol);
+  const puedeCancelar = puedeCancelarPedido(rol);
+
   const pedidosFiltrados =
     lista.tipo === "lista" ? filtrarPorFechas(lista.pedidos, rango) : [];
 
   useEffect(() => {
-    // Si la página se cierra (o se pide otra recarga) antes de que llegue la
-    // respuesta, `vigente` evita pintar un resultado viejo.
     let vigente = true;
     listarPedidos()
       .then((pedidos) => {
@@ -161,22 +169,291 @@ export default function PedidosPage() {
     };
   }, [recarga]);
 
-  return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-8">
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-        Gestión de Pedidos
-      </h1>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Visualización y trazabilidad de los pedidos.
-      </p>
+  // Manejador centralizado para cambiar estado de un pedido (HU-10: ciclo
+  // secuencial + reserva en preparación). El motivo solo viaja al cancelar.
+  const manejarCambiarEstado = async (
+    idPedido: number,
+    nuevoEstado: EstadoPedido,
+    motivo?: string,
+  ) => {
+    try {
+      const pedidoActual =
+        lista.tipo === "lista" ? lista.pedidos.find((p) => p.id === idPedido) : null;
+      const teniaStockReservado = pedidoActual?.stockReservado === true;
 
-      <div className="mt-8">
+      const resultado = await actualizarEstadoPedido(idPedido, nuevoEstado, {
+        estadoActual: pedidoActual?.estado,
+        motivo,
+      });
+
+      // HU-10 — Con la API real el stock lo mueve la base en la misma
+      // transacción del cambio de estado (fn_cambiar_estado_pedido, migraciones
+      // 016 y 018), así que solo hay que refrescar el catálogo. El mock vive en
+      // memoria y se ajusta aquí.
+      let mensajeExtra = "";
+      if (PEDIDOS_USAN_MOCK) {
+        const lineas = pedidoActual?.lineas ?? [];
+        if (nuevoEstado === "EN_PREPARACION" && !teniaStockReservado && lineas.length > 0) {
+          descontarStock(lineas.map((l) => ({ id: l.idProducto, cantidad: l.cantidad })));
+          mensajeExtra = " · Stock reservado en inventario";
+        }
+        if (nuevoEstado === "CANCELADO" && teniaStockReservado && lineas.length > 0) {
+          reponerStock(lineas.map((l) => ({ id: l.idProducto, cantidad: l.cantidad })));
+          mensajeExtra = " · Stock restituido a inventario";
+        }
+      } else {
+        await refrescarProductos();
+        if (nuevoEstado === "EN_PREPARACION") mensajeExtra = " · Stock reservado en inventario";
+        if (nuevoEstado === "CANCELADO" && teniaStockReservado) {
+          mensajeExtra = " · Stock restituido a inventario";
+        }
+      }
+
+      const actualizado = resultado.pedidoActualizado;
+      const estadoFinal = actualizado?.estado ?? resultado.estado;
+      const reservadoFinal =
+        actualizado?.stockReservado ??
+        (nuevoEstado === "EN_PREPARACION"
+          ? true
+          : nuevoEstado === "CANCELADO"
+            ? false
+            : teniaStockReservado);
+
+      setLista((prev) => {
+        if (prev.tipo !== "lista") return prev;
+        return {
+          ...prev,
+          pedidos: prev.pedidos.map((p) =>
+            p.id === idPedido
+              ? { ...p, estado: estadoFinal, stockReservado: reservadoFinal }
+              : p,
+          ),
+        };
+      });
+
+      // Actualizar modal si está abierto con ese pedido
+      setPedidoSeleccionado((actual) =>
+        actual && actual.id === idPedido
+          ? { ...actual, estado: estadoFinal, stockReservado: reservadoFinal }
+          : actual,
+      );
+
+      setAvisoExito(
+        `Pedido #${idPedido} actualizado a "${NOMBRES_ESTADO[estadoFinal]}"${mensajeExtra}.`,
+      );
+      setTimeout(() => setAvisoExito(null), 4000);
+    } catch (err: unknown) {
+      alert(mensajeErrorCambioEstado(err));
+    }
+  };
+
+  // SCRUM-57 — El pedido recién registrado entra a la lista sin recargarla.
+  const manejarPedidoRegistrado = ({ pedido, advertencia }: PedidoRegistrado) => {
+    setLista((prev) =>
+      prev.tipo === "lista" ? { ...prev, pedidos: [pedido, ...prev.pedidos] } : prev,
+    );
+    // Si el filtro de fechas lo dejaría por fuera, se limpia para que se vea.
+    if (filtrarPorFechas([pedido], rango).length === 0) setRango(RANGO_VACIO);
+    setModalNuevoAbierto(false);
+    setAvisoExito(
+      `Pedido #${pedido.id} registrado para ${pedido.cliente}.${advertencia ? ` Ojo: ${advertencia}` : ""}`,
+    );
+    setTimeout(() => setAvisoExito(null), advertencia ? 8000 : 4000);
+  };
+
+  // SCRUM-59 — Abre "Convertir en venta". Cierra la trazabilidad, si estaba
+  // abierta, para no tener dos modales encima.
+  const abrirConversion = (pedido: Pedido) => {
+    setPedidoSeleccionado(null);
+    setPedidoAConvertir(pedido);
+  };
+
+  // SCRUM-59 — El pedido queda marcado con su venta, sin recargar la lista.
+  const manejarVentaConvertida = (venta: VentaDePedido) => {
+    setLista((prev) =>
+      prev.tipo === "lista"
+        ? {
+            ...prev,
+            pedidos: prev.pedidos.map((p) =>
+              p.id === venta.idPedido ? { ...p, idVenta: venta.idVenta } : p,
+            ),
+          }
+        : prev,
+    );
+    setPedidoAConvertir(null);
+    setAvisoExito(
+      `Pedido #${venta.idPedido} convertido en la venta #${venta.idVenta} · ${formatoMoneda.format(venta.total)} (${venta.metodoPago}).`,
+    );
+    setTimeout(() => setAvisoExito(null), 5000);
+  };
+
+  const columnas: ColumnaTabla<Pedido>[] = [
+    {
+      key: "id",
+      header: "N.º",
+      accessor: (p) => p.id,
+      render: (p) => <span className="font-mono font-medium">#{p.id}</span>,
+      sortable: true,
+    },
+    { key: "cliente", header: "Cliente", accessor: (p) => p.cliente, sortable: true },
+    {
+      key: "fechaSolicitud",
+      header: "Fecha de solicitud",
+      accessor: (p) => p.fechaSolicitud,
+      render: (p) => (
+        <>
+          {formatoFecha.format(p.fechaSolicitud)}
+          <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">
+            {formatoHora.format(p.fechaSolicitud)}
+          </span>
+        </>
+      ),
+      sortable: true,
+    },
+    {
+      key: "fechaEntregaPactada",
+      header: "Entrega pactada",
+      accessor: (p) => p.fechaEntregaPactada,
+      render: (p) => formatoFecha.format(p.fechaEntregaPactada),
+      sortable: true,
+    },
+    {
+      key: "estado",
+      header: "Estado",
+      accessor: (p) => NOMBRES_ESTADO[p.estado],
+      render: (p) => (
+        <Badge variant={colorEstado[p.estado]} size="sm" pill>
+          {NOMBRES_ESTADO[p.estado]}
+        </Badge>
+      ),
+      sortable: true,
+    },
+    {
+      key: "total",
+      header: "Total",
+      align: "right",
+      accessor: (p) => p.total,
+      render: (p) => formatoMoneda.format(p.total),
+      sortable: true,
+    },
+    { key: "registradoPor", header: "Registrado por", accessor: (p) => p.registradoPor, sortable: true },
+    {
+      key: "acciones",
+      header: "Acción",
+      align: "right",
+      accessor: () => "",
+      render: (p) => (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* SCRUM-59 — Pedido entregado: su venta, o el botón para convertirlo */}
+          {p.estado === "ENTREGADO" && p.idVenta !== null && (
+            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+              Venta #{p.idVenta}
+            </span>
+          )}
+          {p.estado === "ENTREGADO" && p.idVenta === null && puedeConvertir && (
+            <Button className="text-xs py-1 px-2.5 h-auto" onClick={() => abrirConversion(p)}>
+              Convertir en venta
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            className="text-xs py-1 px-2.5 h-auto"
+            onClick={() => setPedidoSeleccionado(p)}
+          >
+            Línea de tiempo
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
+      {/* Toast de Éxito */}
+      {avisoExito && (
+        <div className="fixed top-4 right-4 z-50 animate-in fade-in slide-in-from-top-5 duration-300">
+          <div className="bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 border border-emerald-700">
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <span className="font-medium text-sm">{avisoExito}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Encabezado y Selector de Vistas */}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+            Gestión y Trazabilidad de Pedidos
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Monitorea y cambia el estado de cada pedido a lo largo de su ciclo de vida.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
+        {/* Selector de Vista: Tablero Kanban o Lista en Tabla */}
+        <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+          <button
+            type="button"
+            onClick={() => setVista("tablero")}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+              vista === "tablero"
+                ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
+                : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+            </svg>
+            Tablero Visual (Kanban)
+          </button>
+          <button
+            type="button"
+            onClick={() => setVista("tabla")}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+              vista === "tabla"
+                ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
+                : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
+            Tabla Detallada
+          </button>
+        </div>
+
+        {/* SCRUM-57 — Abre el formulario de registro */}
+        {puedeRegistrar && (
+          <Button
+            onClick={() => {
+              setNuevoPedido((n) => n + 1);
+              setModalNuevoAbierto(true);
+            }}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Nuevo pedido
+          </Button>
+        )}
+        </div>
+      </div>
+
+      {/* Panel Central */}
+      <div className="mt-6">
         {lista.tipo === "cargando" && <ListaCargando />}
 
         {lista.tipo === "error" && (
           <div
             role="alert"
-            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
           >
             <span>No se pudo cargar la lista de pedidos. {lista.mensaje}</span>
             <Button
@@ -192,35 +469,158 @@ export default function PedidosPage() {
         )}
 
         {lista.tipo === "lista" && (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-6">
             <FiltroFechasPedidos
               rango={rango}
               onCambiar={setRango}
               mostrados={pedidosFiltrados.length}
               total={lista.pedidos.length}
             />
-            <DataTable
-              columns={columnas}
-              data={pedidosFiltrados}
-              getRowKey={(p) => p.id}
-              initialSort={{ key: "fechaSolicitud", direction: "desc" }}
-              caption="Lista de pedidos"
-              emptyMessage={
-                hayRango(rango) ? (
-                  <span className="flex flex-col items-center gap-3">
-                    No hay pedidos en ese período.
-                    <Button variant="secondary" onClick={() => setRango(RANGO_VACIO)}>
-                      Limpiar filtro
-                    </Button>
-                  </span>
-                ) : (
-                  "Todavía no hay pedidos registrados."
-                )
-              }
-            />
+
+            {/* VISTA 1: TABLERO VISUAL KANBAN */}
+            {vista === "tablero" && (
+              <TableroEstadosPedidos
+                pedidos={pedidosFiltrados}
+                onCambiarEstado={manejarCambiarEstado}
+                onSeleccionarPedido={(p) => setPedidoSeleccionado(p)}
+                pedidoSeleccionadoId={pedidoSeleccionado?.id}
+                onConvertirEnVenta={puedeConvertir ? abrirConversion : undefined}
+                estadosPermitidos={estadosPermitidos}
+              />
+            )}
+
+            {/* VISTA 2: TABLA DETALLADA CON ACCIÓN DIRECTA */}
+            {vista === "tabla" && (
+              <DataTable
+                columns={columnas}
+                data={pedidosFiltrados}
+                getRowKey={(p) => p.id}
+                initialSort={{ key: "fechaSolicitud", direction: "desc" }}
+                caption="Lista de pedidos"
+                emptyMessage={
+                  hayRango(rango) ? (
+                    <span className="flex flex-col items-center gap-3">
+                      No hay pedidos en ese período.
+                      <Button variant="secondary" onClick={() => setRango(RANGO_VACIO)}>
+                        Limpiar filtro
+                      </Button>
+                    </span>
+                  ) : (
+                    "Todavía no hay pedidos registrados."
+                  )
+                }
+              />
+            )}
           </div>
         )}
       </div>
+
+      {/* SCRUM-57 — Modal "Nuevo pedido". Un clic afuera no lo cierra, para
+          no perder lo que ya se llenó por accidente. */}
+      <Modal
+        isOpen={modalNuevoAbierto}
+        onClose={() => setModalNuevoAbierto(false)}
+        title="Nuevo pedido"
+        maxWidth="3xl"
+        closeOnBackdropClick={false}
+      >
+        <FormularioPedido
+          key={nuevoPedido}
+          onRegistrado={manejarPedidoRegistrado}
+          onCancelar={() => setModalNuevoAbierto(false)}
+        />
+      </Modal>
+
+      {/* SCRUM-59 — Modal "Convertir en venta". La key hace que cada pedido
+          arranque con el formulario vacío. */}
+      <Modal
+        isOpen={Boolean(pedidoAConvertir)}
+        onClose={() => setPedidoAConvertir(null)}
+        title={`Convertir pedido #${pedidoAConvertir?.id} en venta`}
+        maxWidth="lg"
+        closeOnBackdropClick={false}
+      >
+        {pedidoAConvertir && (
+          <ConvertirPedidoEnVenta
+            key={pedidoAConvertir.id}
+            pedido={pedidoAConvertir}
+            onConvertida={manejarVentaConvertida}
+            onCancelar={() => setPedidoAConvertir(null)}
+          />
+        )}
+      </Modal>
+
+      {/* Modal con la Línea de Tiempo Interactiva del Pedido Seleccionado */}
+      <Modal
+        isOpen={Boolean(pedidoSeleccionado)}
+        onClose={() => setPedidoSeleccionado(null)}
+        title={`Trazabilidad - Pedido #${pedidoSeleccionado?.id}`}
+        maxWidth="xl"
+      >
+        {pedidoSeleccionado && (
+          <div className="space-y-6">
+            {/* Cabecera Informativa del Pedido */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 text-sm">
+              <div>
+                <span className="text-xs text-zinc-500 block">Cliente</span>
+                <span className="font-bold text-zinc-900 dark:text-zinc-100">
+                  {pedidoSeleccionado.cliente}
+                </span>
+              </div>
+              <div>
+                <span className="text-xs text-zinc-500 block">Fecha Solicitud</span>
+                <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                  {formatoFecha.format(pedidoSeleccionado.fechaSolicitud)}
+                </span>
+              </div>
+              <div>
+                <span className="text-xs text-zinc-500 block">Entrega Pactada</span>
+                <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                  {formatoFecha.format(pedidoSeleccionado.fechaEntregaPactada)}
+                </span>
+              </div>
+              <div>
+                <span className="text-xs text-zinc-500 block">Monto Total</span>
+                <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
+                  {formatoMoneda.format(pedidoSeleccionado.total)}
+                </span>
+              </div>
+            </div>
+
+            {/* Línea de Tiempo Interactiva */}
+            <LineaTiempoPedido
+              pedido={pedidoSeleccionado}
+              onCambiarEstado={manejarCambiarEstado}
+              estadosPermitidos={estadosPermitidos}
+              permiteCancelar={puedeCancelar}
+            />
+
+            {/* SCRUM-59 — Pedido entregado: su venta, o el botón para convertirlo */}
+            {pedidoSeleccionado.estado === "ENTREGADO" &&
+              (pedidoSeleccionado.idVenta !== null ? (
+                <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  Este pedido ya se convirtió en la <strong>venta #{pedidoSeleccionado.idVenta}</strong>.
+                  Puedes verla en el historial de Ventas.
+                </p>
+              ) : (
+                puedeConvertir && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                    <span>Pedido entregado: ya se puede registrar como venta.</span>
+                    <Button onClick={() => abrirConversion(pedidoSeleccionado)}>
+                      Convertir en venta
+                    </Button>
+                  </div>
+                )
+              ))}
+
+            <div className="flex justify-end pt-2 border-t border-zinc-200 dark:border-zinc-800">
+              <Button variant="secondary" onClick={() => setPedidoSeleccionado(null)}>
+                Cerrar Trazabilidad
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </main>
   );
 }

@@ -5,6 +5,11 @@ const pool = require('../config/db');
 // Un pedido abierto está vencido si ya pasó su fecha pactada (se calcula, no se guarda)
 const VENCIDO = `(p.fecha_entrega_pactada < now() AND p.estado NOT IN ('ENTREGADO', 'CANCELADO'))`;
 
+// HU-10 — El stock ya salió del catálogo: se descontó al pasar a
+// EN_PREPARACION y solo vuelve si el pedido se cancela (016 y 018). También se
+// calcula: la base no guarda una bandera aparte.
+const STOCK_RESERVADO = `(p.estado IN ('EN_PREPARACION', 'LISTO'))`;
+
 // SCRUM-81: registra el pedido en estado REGISTRADO con sus líneas, en una
 // transacción. El precio de cada línea es el precio de venta vigente del
 // producto (no lo decide quien llama). El trigger de 004 deja el estado
@@ -45,7 +50,8 @@ async function obtenerPedido(idPedido) {
         `SELECT p.id_pedido, p.id_cliente, c.nombre AS nombre_cliente, c.identificacion AS identificacion_cliente,
                 c.telefono AS telefono_cliente, p.id_usuario, u.nombre_completo AS nombre_usuario,
                 p.estado, p.fecha_solicitud, p.fecha_entrega_pactada, p.direccion_entrega, p.observaciones,
-                p.total, ${VENCIDO} AS vencido, p.actualizado_en, v.id_venta
+                p.total, ${VENCIDO} AS vencido, ${STOCK_RESERVADO} AS stock_reservado,
+                p.actualizado_en, v.id_venta
          FROM pedidos p
          JOIN clientes c ON c.id_cliente = p.id_cliente
          JOIN usuarios u ON u.id_usuario = p.id_usuario
@@ -93,7 +99,8 @@ async function listarPedidos({ desde, hasta, estado, idCliente }) {
 
     const { rows } = await pool.query(
         `SELECT p.id_pedido, p.id_cliente, c.nombre AS nombre_cliente, p.id_usuario, u.nombre_completo AS nombre_usuario,
-                p.estado, p.fecha_solicitud, p.fecha_entrega_pactada, p.total, ${VENCIDO} AS vencido,
+                p.estado, p.fecha_solicitud, p.fecha_entrega_pactada, p.direccion_entrega, p.observaciones,
+                p.total, ${VENCIDO} AS vencido, ${STOCK_RESERVADO} AS stock_reservado,
                 (SELECT count(*)::int FROM detalles_pedidos d WHERE d.id_pedido = p.id_pedido) AS cantidad_productos,
                 v.id_venta
          FROM pedidos p

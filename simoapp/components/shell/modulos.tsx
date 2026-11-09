@@ -1,8 +1,7 @@
-// SCRUM-107 (Camilo) — Lista de módulos que se muestran en el Sidebar,
-// según el alcance funcional definido en CLAUDE.md. Solo "Catálogo e
-// Inventario" tiene página real hoy (/catalogo); las demás rutas son
-// placeholders para que el link ya quede listo cuando otro ticket construya
-// esa página (mientras tanto, esos links dan 404, lo cual es esperado).
+// SCRUM-107 (Camilo) — Lista de módulos que se muestran en el Sidebar. Es la
+// lista completa: qué ve cada rol lo decide lib/auth/permisos.ts (la matriz
+// módulo × rol), que el Sidebar aplica con puedeVerRuta() y middleware.ts
+// repite del lado del servidor.
 
 import type { ModuloNav } from "./tipos";
 
@@ -52,6 +51,11 @@ export const modulos: ModuloNav[] = [
     ),
   },
   {
+    // HU-15 — Alertas y Auditoría (/alertas): alertas de reposición de stock,
+    // log de auditoría inalterable (cancelaciones y ajustes manuales de
+    // existencias) y consola de descargas de reportes en PDF/Excel/Word. El
+    // Administrador y el Gerente lo ven completo; el Encargado de Inventario
+    // solo las alertas de stock (ver lib/auth/permisos.ts).
     nombre: "Alertas y Auditoría",
     href: "/alertas",
     icono: (
@@ -59,9 +63,9 @@ export const modulos: ModuloNav[] = [
     ),
   },
   {
-    // SCRUM-loginMejora (Camilo) — Enlace a Gestión de Usuarios (crear usuario). Solo
-    // entra el Administrador: a los demás roles middleware.ts los devuelve
-    // al inicio.
+    // SCRUM-loginMejora (Camilo) — Enlace a Gestión de Usuarios (crear usuario).
+    // EP-01: solo el Administrador; a los demás roles middleware.ts los
+    // devuelve al inicio de su propio rol.
     nombre: "Usuarios",
     href: "/usuarios",
     icono: (

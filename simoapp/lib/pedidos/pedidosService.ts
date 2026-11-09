@@ -2,11 +2,10 @@
 // pedidos. La página /pedidos llama a listarPedidos() sin saber si detrás
 // está la API real o el mock.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_PEDIDOS_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// ninguna rama del backend tiene todavía endpoints de pedidos (revisado el
-// 2026-10-18: solo existen las tablas, migración 004).
+// POR DEFECTO HABLA CON LA API REAL: /api/orders (backend/src/routes/
+// pedidos.routes.js, HU-10). Para trabajar sin base de datos, en
+// simoapp/.env.local poner NEXT_PUBLIC_PEDIDOS_MOCK=true y reiniciar
+// `npm run dev`; con el mock la lista y los cambios viven en el navegador.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (ver camilo-sanchez.md, SCRUM-125):
 //   GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD
@@ -19,11 +18,59 @@
 // Por ahora el front pide todo y filtra en el navegador (así el filtro es
 // instantáneo). Cuando haya muchos pedidos, se mandan desde/hasta.
 
+//
+// SCRUM-57 (Camilo) — Se agregó registrarPedido() para el formulario "Nuevo
+// pedido". Usa el MISMO interruptor NEXT_PUBLIC_PEDIDOS_MOCK que la lista,
+// para que un pedido creado en el mock aparezca en la lista del mock (y uno
+// creado en la API, en la lista de la API).
+// CONTRATO (el que ya implementó Ramón en la rama back-end, SCRUM-81):
+//   POST /api/orders   (roles VENDEDOR, GERENTE y ADMIN)
+//   Recibe: { id_cliente, fecha_entrega_pactada: "AAAA-MM-DD",
+//             direccion_entrega?, observaciones?,
+//             lineas: [{ id_producto, cantidad }] }
+//     - quien registra sale del token; el precio de cada línea es el precio
+//       de venta vigente del producto (lo pone la base, no el front).
+//   Responde 201: { message, pedido, advertencia? }
+//     - pedido trae los mismos campos que una fila de GET /api/orders.
+//     - advertencia: si hoy no alcanza el stock de algún producto. No
+//       impide registrar (el stock se descuenta en EN_PREPARACION).
+//   Errores: 400 dato inválido · 404 cliente o producto no existe ·
+//            409 el cliente está inactivo.
+//
+// SCRUM-59 (Camilo) — Se agregó convertirPedidoEnVenta(): convierte un pedido
+// ENTREGADO en venta (HU-12). Mismo interruptor NEXT_PUBLIC_PEDIDOS_MOCK.
+// CONTRATO (el que ya implementó Ramón en la rama back-end, SCRUM-62):
+//   POST /api/orders/:id/convert-to-sale   (roles VENDEDOR, GERENTE y ADMIN)
+//   Recibe: { metodo_pago: "EFECTIVO" | "NEQUI" | ..., descuento? }
+//     - la venta toma el cliente, las líneas y los precios del pedido; quien
+//       la registra sale del token. No mueve stock: ya salió al pasar el
+//       pedido a EN_PREPARACION.
+//   Responde 201: { message, venta: { id_venta, id_pedido, metodo_pago,
+//                   nombre_metodo_pago, subtotal, descuento, total, ... } }
+//   Errores: 400 método o descuento inválido · 404 el pedido no existe ·
+//            409 el pedido no está ENTREGADO o ya se convirtió en venta.
+//   GET /api/orders ya trae id_venta en cada fila (null si no hay venta).
+
 import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
-import type { EstadoPedido, Pedido } from "./tipos";
+import { anexarVentaHistorial, listarVentas } from "@/lib/ventas/anulacionService";
+import { METODOS_PAGO } from "@/lib/ventas/tipos";
+import {
+  NOMBRES_ESTADO,
+  TRANSICIONES_VALIDAS,
+  type DatosConversionVenta,
+  type DatosPedidoNuevo,
+  type EstadoPedido,
+  type Pedido,
+  type PedidoRegistrado,
+  type VentaDePedido,
+} from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK !== "false";
+// HU-10 — La página necesita saber si el stock lo mueve el backend (descuento
+// en preparación y devolución al cancelar) o si lo simula el mock en memoria.
+// El mock es opcional y hay que pedirlo: sin la variable, se usa la API real.
+export const PEDIDOS_USAN_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK === "true";
+const USAR_MOCK = PEDIDOS_USAN_MOCK;
 
 interface FilaPedido {
   id_pedido: number;
@@ -34,6 +81,9 @@ interface FilaPedido {
   fecha_entrega_pactada: string;
   // PostgreSQL manda los NUMERIC como texto ("125000.00").
   total: string | number;
+  id_venta?: number | null;
+  /** HU-10 — El stock salió del catálogo al pasar a EN_PREPARACION. */
+  stock_reservado?: boolean | null;
 }
 
 function aPedido(fila: FilaPedido): Pedido {
@@ -45,6 +95,8 @@ function aPedido(fila: FilaPedido): Pedido {
     fechaSolicitud: new Date(fila.fecha_solicitud),
     fechaEntregaPactada: new Date(fila.fecha_entrega_pactada),
     total: Number(fila.total),
+    idVenta: fila.id_venta ?? null,
+    stockReservado: fila.stock_reservado === true,
   };
 }
 
@@ -53,6 +105,205 @@ export async function listarPedidos(): Promise<Pedido[]> {
 
   const { data } = await apiClient.get("/orders");
   return (data.data as FilaPedido[]).map(aPedido);
+}
+
+// HU-10 — Errores del cambio de estado, ya traducidos para la pantalla.
+export type TipoErrorCambioEstado = "datos_invalidos" | "no_existe" | "conflicto" | "sin_conexion" | "servidor";
+
+export class ErrorCambioEstadoPedido extends Error {
+  tipo: TipoErrorCambioEstado;
+
+  constructor(tipo: TipoErrorCambioEstado, mensaje: string) {
+    super(mensaje);
+    this.name = "ErrorCambioEstadoPedido";
+    this.tipo = tipo;
+  }
+}
+
+export interface OpcionesCambioEstado {
+  /** Estado actual del pedido: con él se valida la secuencia antes de llamar. */
+  estadoActual?: EstadoPedido;
+  /** Obligatorio al cancelar (CU-13 EX-2). */
+  motivo?: string;
+}
+
+export async function actualizarEstadoPedido(
+  idPedido: number,
+  nuevoEstado: EstadoPedido,
+  { estadoActual, motivo }: OpcionesCambioEstado = {},
+): Promise<{ id: number; estado: EstadoPedido; pedidoActualizado?: Pedido }> {
+  // HU-10 — La misma regla que el trigger de la base (RN-04): un paso a la
+  // vez y CANCELADO solo antes de ENTREGADO. Se valida aquí para avisar en
+  // pantalla de inmediato y porque el mock no tiene trigger que lo impida.
+  if (estadoActual !== undefined && !TRANSICIONES_VALIDAS[estadoActual].includes(nuevoEstado)) {
+    throw new ErrorCambioEstadoPedido(
+      "conflicto",
+      `Un pedido en estado "${NOMBRES_ESTADO[estadoActual]}" no puede pasar a "${NOMBRES_ESTADO[nuevoEstado]}".`,
+    );
+  }
+
+  const motivoLimpio = (motivo ?? "").trim();
+  if (nuevoEstado === "CANCELADO" && !motivoLimpio) {
+    throw new ErrorCambioEstadoPedido("datos_invalidos", "Indica el motivo de la cancelación.");
+  }
+
+  if (USAR_MOCK) return actualizarEstadoPedidoMock(idPedido, nuevoEstado);
+
+  try {
+    const { data } = await apiClient.patch(`/orders/${idPedido}/status`, {
+      estado: nuevoEstado,
+      // El backend solo lo exige al cancelar (CU-13 EX-2).
+      motivo: nuevoEstado === "CANCELADO" ? motivoLimpio : undefined,
+    });
+
+    return {
+      id: idPedido,
+      estado: (data.pedido?.estado as EstadoPedido) || nuevoEstado,
+      pedidoActualizado: data.pedido ? aPedido(data.pedido as FilaPedido) : undefined,
+    };
+  } catch (error) {
+    throw aErrorCambioEstado(error);
+  }
+}
+
+function aErrorCambioEstado(error: unknown): ErrorCambioEstadoPedido {
+  if (!isAxiosError(error)) return new ErrorCambioEstadoPedido("servidor", "Error inesperado.");
+  if (!error.response) return new ErrorCambioEstadoPedido("sin_conexion", error.message);
+  const mensaje: unknown = error.response.data?.message;
+  const texto = typeof mensaje === "string" ? mensaje : error.message;
+  if (error.response.status === 400) return new ErrorCambioEstadoPedido("datos_invalidos", texto);
+  if (error.response.status === 404) return new ErrorCambioEstadoPedido("no_existe", texto);
+  if (error.response.status === 409) return new ErrorCambioEstadoPedido("conflicto", texto);
+  return new ErrorCambioEstadoPedido("servidor", texto);
+}
+
+export function mensajeErrorCambioEstado(error: unknown): string {
+  if (!(error instanceof ErrorCambioEstadoPedido)) {
+    return "Ocurrió un error inesperado. Inténtalo de nuevo.";
+  }
+  switch (error.tipo) {
+    case "datos_invalidos":
+      return error.message || "El cambio de estado no es válido.";
+    case "no_existe":
+      return `${error.message || "El pedido ya no existe."} Recarga la página.`;
+    case "conflicto":
+      return `${error.message || "El pedido no admite ese cambio de estado."} Recarga la página para ver cómo quedó.`;
+    case "sin_conexion":
+      return "No pudimos conectar con el servidor. El pedido NO cambió; inténtalo de nuevo.";
+    case "servidor":
+      return "El servidor tuvo un problema. El pedido NO cambió; inténtalo de nuevo.";
+  }
+}
+
+type TipoErrorRegistro = "datos_invalidos" | "no_existe" | "conflicto" | "sin_conexion" | "servidor";
+
+export class ErrorRegistroPedido extends Error {
+  tipo: TipoErrorRegistro;
+
+  constructor(tipo: TipoErrorRegistro, mensaje: string) {
+    super(mensaje);
+    this.name = "ErrorRegistroPedido";
+    this.tipo = tipo;
+  }
+}
+
+// SCRUM-57 (Camilo) — Registra un pedido nuevo (nace REGISTRADO).
+export async function registrarPedido(datos: DatosPedidoNuevo): Promise<PedidoRegistrado> {
+  if (USAR_MOCK) return registrarPedidoMock(datos);
+
+  try {
+    const { data } = await apiClient.post("/orders", {
+      id_cliente: datos.idCliente,
+      fecha_entrega_pactada: datos.fechaEntregaPactada,
+      direccion_entrega: datos.direccionEntrega.trim() || undefined,
+      observaciones: datos.observaciones.trim() || undefined,
+      lineas: datos.lineas.map((l) => ({ id_producto: l.idProducto, cantidad: l.cantidad })),
+    });
+    return {
+      pedido: aPedido(data.pedido as FilaPedido),
+      advertencia: typeof data.advertencia === "string" ? data.advertencia : null,
+    };
+  } catch (error) {
+    throw aErrorPedido(error);
+  }
+}
+
+// SCRUM-59 (Camilo) — Traduce el error de Axios a un ErrorRegistroPedido. Lo
+// comparten el registro y la conversión en venta: responden los mismos
+// códigos (400, 404, 409).
+function aErrorPedido(error: unknown): ErrorRegistroPedido {
+  if (!isAxiosError(error)) return new ErrorRegistroPedido("servidor", "Error inesperado.");
+  if (!error.response) return new ErrorRegistroPedido("sin_conexion", error.message);
+  const mensaje: unknown = error.response.data?.message;
+  const texto = typeof mensaje === "string" ? mensaje : error.message;
+  if (error.response.status === 400) return new ErrorRegistroPedido("datos_invalidos", texto);
+  if (error.response.status === 404) return new ErrorRegistroPedido("no_existe", texto);
+  if (error.response.status === 409) return new ErrorRegistroPedido("conflicto", texto);
+  return new ErrorRegistroPedido("servidor", texto);
+}
+
+export function mensajeErrorRegistro(error: unknown): string {
+  if (!(error instanceof ErrorRegistroPedido)) return "Ocurrió un error inesperado. Inténtalo de nuevo.";
+  switch (error.tipo) {
+    case "datos_invalidos":
+      return error.message || "Hay datos inválidos en el pedido. Revísalos.";
+    case "no_existe":
+      return `${error.message || "El cliente o un producto ya no existe."} Recarga la página y revisa.`;
+    case "conflicto":
+      return error.message || "El cliente está inactivo: no se le pueden registrar pedidos.";
+    case "sin_conexion":
+      return "No pudimos conectar con el servidor. El pedido NO se registró; inténtalo de nuevo.";
+    case "servidor":
+      return "El servidor tuvo un problema. El pedido NO se registró; inténtalo de nuevo.";
+  }
+}
+
+// SCRUM-59 (Camilo) — Convierte un pedido ENTREGADO en venta (HU-12).
+export async function convertirPedidoEnVenta(
+  idPedido: number,
+  datos: DatosConversionVenta,
+): Promise<VentaDePedido> {
+  if (USAR_MOCK) return convertirPedidoEnVentaMock(idPedido, datos);
+
+  try {
+    const { data } = await apiClient.post(`/orders/${idPedido}/convert-to-sale`, {
+      metodo_pago: datos.metodoPago,
+      descuento: datos.descuento > 0 ? datos.descuento : undefined,
+      // SCRUM-73 — El endpoint de Ramón todavía no lo guarda (lo ignora sin
+      // error). El comprobante no se manda: ver ventasService.ts.
+      referencia_pago: datos.soportePago?.referencia || undefined,
+    });
+    return {
+      idVenta: data.venta.id_venta,
+      idPedido,
+      descuento: Number(data.venta.descuento),
+      total: Number(data.venta.total),
+      metodoPago: data.venta.nombre_metodo_pago ?? nombreMetodo(datos.metodoPago),
+    };
+  } catch (error) {
+    throw aErrorPedido(error);
+  }
+}
+
+export function mensajeErrorConversion(error: unknown): string {
+  if (!(error instanceof ErrorRegistroPedido)) return "Ocurrió un error inesperado. Inténtalo de nuevo.";
+  switch (error.tipo) {
+    case "datos_invalidos":
+      return error.message || "El método de pago o el descuento no son válidos. Revísalos.";
+    case "no_existe":
+      return `${error.message || "El pedido ya no existe."} Recarga la página.`;
+    case "conflicto":
+      // "El pedido 1004 ya se convirtió en la venta 9301." o "... no está ENTREGADO".
+      return `${error.message || "El pedido ya no se puede convertir en venta."} Recarga la página para ver cómo quedó.`;
+    case "sin_conexion":
+      return "No pudimos conectar con el servidor. La venta NO se registró; inténtalo de nuevo.";
+    case "servidor":
+      return "El servidor tuvo un problema. La venta NO se registró; inténtalo de nuevo.";
+  }
+}
+
+function nombreMetodo(codigo: DatosConversionVenta["metodoPago"]): string {
+  return METODOS_PAGO.find((m) => m.codigo === codigo)?.nombre ?? codigo;
 }
 
 export function mensajeErrorPedidos(error: unknown): string {
@@ -101,10 +352,31 @@ const datosMock: [number, string, string, EstadoPedido, number, number, number, 
   [1012, "Juan Sebastián Rincón", "Carlos Inventario", "REGISTRADO", 0, 8, 2, 47900],
 ];
 
-async function listarPedidosMock(): Promise<Pedido[]> {
-  await esperar(500);
-  return datosMock.map(([id, cliente, registradoPor, estado, dias, hora, entrega, total]) => {
+const CLAVE_STORAGE_PEDIDOS = "simo.pedidos.mock";
+
+function obtenerPedidosMemoria(): Pedido[] {
+  if (typeof window !== "undefined") {
+    try {
+      const guardado = localStorage.getItem(CLAVE_STORAGE_PEDIDOS);
+      if (guardado) {
+        const parsed = JSON.parse(guardado) as Array<Omit<Pedido, "fechaSolicitud" | "fechaEntregaPactada"> & { fechaSolicitud: string; fechaEntregaPactada: string }>;
+        return parsed.map((p) => ({
+          ...p,
+          fechaSolicitud: new Date(p.fechaSolicitud),
+          fechaEntregaPactada: new Date(p.fechaEntregaPactada),
+          // Los pedidos guardados antes de SCRUM-59 no tienen este campo.
+          idVenta: p.idVenta ?? null,
+        }));
+      }
+    } catch {
+      // Si falla localStorage, usa semilla
+    }
+  }
+
+// Generar desde datosMock iniciales con productos asignados para permitir reserva de stock (HU-10)
+  return datosMock.map(([id, cliente, registradoPor, estado, dias, hora, entrega, total], index) => {
     const fechaSolicitud = haceDias(dias, hora, (id * 7) % 60);
+    const idProductoAsignado = (index % 5) + 1; // Distribuye entre productos 1 a 5
     return {
       id,
       cliente,
@@ -113,6 +385,135 @@ async function listarPedidosMock(): Promise<Pedido[]> {
       fechaSolicitud,
       fechaEntregaPactada: masDias(fechaSolicitud, entrega),
       total,
+      idVenta: null,
+      lineas: [
+        {
+          idProducto: idProductoAsignado,
+          cantidad: 1,
+          precioUnitario: total,
+        },
+      ],
+      stockReservado: estado === "EN_PREPARACION" || estado === "LISTO" || estado === "ENTREGADO",
     };
   });
+}
+
+function guardarPedidosMemoria(pedidos: Pedido[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CLAVE_STORAGE_PEDIDOS, JSON.stringify(pedidos));
+  } catch (err) {
+    console.error("Error guardando pedidos en storage:", err);
+  }
+}
+
+async function listarPedidosMock(): Promise<Pedido[]> {
+  await esperar(400);
+  const pedidos = obtenerPedidosMemoria();
+  // Asegurar que quede guardado en storage para cambios futuros
+  guardarPedidosMemoria(pedidos);
+  return pedidos;
+}
+
+async function actualizarEstadoPedidoMock(
+  idPedido: number,
+  nuevoEstado: EstadoPedido,
+): Promise<{ id: number; estado: EstadoPedido; pedidoActualizado: Pedido }> {
+  await esperar(300);
+  const pedidos = obtenerPedidosMemoria();
+  const indice = pedidos.findIndex((p) => p.id === idPedido);
+  if (indice === -1) {
+    throw new Error(`Pedido #${idPedido} no encontrado.`);
+  }
+
+  const pedido = pedidos[indice];
+  pedido.estado = nuevoEstado;
+  if (nuevoEstado === "EN_PREPARACION") {
+    pedido.stockReservado = true;
+  } else if (nuevoEstado === "CANCELADO" && pedido.stockReservado) {
+    pedido.stockReservado = false;
+  }
+
+  guardarPedidosMemoria(pedidos);
+  return { id: idPedido, estado: nuevoEstado, pedidoActualizado: { ...pedido } };
+}
+
+// SCRUM-57 (Camilo) — Mock del registro: lo agrega a los pedidos guardados en
+// este navegador, con el número siguiente, y avisa si no alcanza el stock
+// (el formulario ya lo sabe, así que el mock no repite esa cuenta).
+async function registrarPedidoMock(datos: DatosPedidoNuevo): Promise<PedidoRegistrado> {
+  await esperar(700);
+  const pedidos = obtenerPedidosMemoria();
+  const total = datos.lineas.reduce(
+    (suma, l) => suma + Math.round(l.cantidad * l.precioUnitario * 100) / 100,
+    0,
+  );
+  // Igual que el backend: se pacta para el final del día elegido.
+  const [anio, mes, dia] = datos.fechaEntregaPactada.split("-").map(Number);
+  const pedido: Pedido = {
+    id: pedidos.reduce((mayor, p) => Math.max(mayor, p.id), 1000) + 1,
+    cliente: datos.nombreCliente,
+    registradoPor: "Tú (sesión actual)",
+    estado: "REGISTRADO",
+    fechaSolicitud: new Date(),
+    fechaEntregaPactada: new Date(anio, mes - 1, dia, 23, 59, 59),
+    total,
+    idVenta: null,
+    lineas: datos.lineas,
+    stockReservado: false,
+  };
+  guardarPedidosMemoria([...pedidos, pedido]);
+  return { pedido, advertencia: null };
+}
+
+// SCRUM-59 (Camilo) — Mock de la conversión: aplica las mismas reglas que
+// fn_convertir_pedido_en_venta (migración 017) y deja la venta en el historial
+// de ventas de este navegador, para verla en /ventas. Los pedidos de prueba
+// no guardan sus productos, así que esa venta sale sin artículos en el detalle.
+async function convertirPedidoEnVentaMock(
+  idPedido: number,
+  datos: DatosConversionVenta,
+): Promise<VentaDePedido> {
+  await esperar(700);
+  const pedidos = obtenerPedidosMemoria();
+  const pedido = pedidos.find((p) => p.id === idPedido);
+  if (!pedido) throw new ErrorRegistroPedido("no_existe", `El pedido ${idPedido} no existe.`);
+  if (pedido.estado !== "ENTREGADO") {
+    throw new ErrorRegistroPedido(
+      "conflicto",
+      `Solo un pedido entregado se convierte en venta; el pedido ${idPedido} está "${pedido.estado}".`,
+    );
+  }
+  if (pedido.idVenta !== null) {
+    throw new ErrorRegistroPedido(
+      "conflicto",
+      `El pedido ${idPedido} ya se convirtió en la venta ${pedido.idVenta}.`,
+    );
+  }
+  if (datos.descuento < 0 || datos.descuento > pedido.total) {
+    throw new ErrorRegistroPedido("datos_invalidos", "El descuento debe estar entre 0 y el total del pedido.");
+  }
+
+  const ventas = await listarVentas();
+  const idVenta = ventas.reduce((mayor, v) => Math.max(mayor, v.idVenta), 0) + 1;
+  const total = pedido.total - datos.descuento;
+  anexarVentaHistorial(
+    { idVenta, fecha: new Date().toISOString(), total },
+    {
+      metodoPago: datos.metodoPago,
+      idCliente: null,
+      items: [],
+      subtotal: pedido.total,
+      descuento: datos.descuento,
+      impuestos: 0,
+      total,
+      soportePago: datos.soportePago ?? null,
+    },
+    "Tú (sesión actual)",
+    pedido.cliente,
+  );
+
+  pedido.idVenta = idVenta;
+  guardarPedidosMemoria(pedidos);
+  return { idVenta, idPedido, descuento: datos.descuento, total, metodoPago: nombreMetodo(datos.metodoPago) };
 }

@@ -25,7 +25,7 @@ const helmet = require('helmet');
 const { sanitizarXss } = require('./src/middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
 const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
 const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
-const pedidosRoutes = require('./src/routes/pedidos.routes'); // SCRUM-81 / HU-10
+const pedidosRoutes = require('./src/routes/pedidos.routes'); // HU-10
 
 
 const app = express();
