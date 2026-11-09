@@ -7,6 +7,7 @@ const JWT = require('./src/config/jwt'); // clave y expiración compartidas con 
 const pool = require('./db');
 const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
 const ventasRoutes = require('./routes/ventasRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 const errorHandler = require('./middleware/errorHandler');
 // DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
 // está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
@@ -56,6 +57,7 @@ const limiter = rateLimit({
 // Tus enrutadores actuales
 app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Aplicar el limitador a todas las rutas de la API
 app.use('/api', limiter);
