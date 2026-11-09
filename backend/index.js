@@ -9,6 +9,7 @@ const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/2
 const ventasRoutes = require('./routes/ventasRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const errorHandler = require('./middleware/errorHandler');
+const iniciarAuditoriaPedidos = require('./cron/auditarPedidos');
 // DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
 // está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
 // backend/limpiarReservas.js (no en cron/) y usa tablas (reservas_stock,
@@ -500,6 +501,19 @@ app.use((req, res, next) => {
 app.use(errorHandler);
 // Iniciar procesos en segundo plano
 // iniciarLimpiezaDeReservas(); // DESACTIVADO, ver arriba
+
+// =====================================================================
+// INICIALIZACIÓN DE TAREAS PROGRAMADAS (CRON JOBS)
+// =====================================================================
+iniciarLimpiezaDeReservas(); // El que ya tenías (SCRUM-130)
+iniciarAuditoriaPedidos();   // El nuevo de medianoche (SCRUM-69)
+
+// =====================================================================
+// INICIALIZACIÓN DEL SERVIDOR
+// =====================================================================
+app.listen(port, () => {
+    console.log(`Servidor corriendo en http://localhost:${port}`);
+});
 
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
