@@ -5,6 +5,10 @@
 // REGISTRADO -> CONFIRMADO -> EN_PREPARACION -> LISTO -> ENTREGADO
 // (o estado CANCELADO). Permite accionar el cambio al siguiente estado
 // o cancelar con confirmación.
+//
+// EP-04 — Las acciones dependen del rol (lib/auth/permisos.ts): el Vendedor
+// mueve todo el ciclo y cancela, el Encargado de Inventario solo alista y el
+// Administrador y el Gerente únicamente miran la trazabilidad.
 
 import { useState } from "react";
 import Button from "@/components/ui/Button";
@@ -24,9 +28,21 @@ interface LineaTiempoPedidoProps {
     nuevoEstado: EstadoPedido,
     motivo?: string,
   ) => Promise<void>;
-  /** HU-10 — Los roles sin permiso (p. ej. Inventario) solo consultan. */
-  disabled?: boolean;
+  /** EP-04 — Estados a los que el rol de la sesión puede mover el pedido. Si
+   *  no llega, se asume el ciclo completo (Vendedor); vacío = solo consulta. */
+  estadosPermitidos?: readonly EstadoPedido[];
+  /** EP-04 — La cancelación exige motivo y no es de todos los roles: el
+   *  Inventario alista pero no cancela. */
+  permiteCancelar?: boolean;
 }
+
+// Avances del ciclo que puede aplicar el rol que opera los pedidos.
+const AVANCES_COMPLETOS: readonly EstadoPedido[] = [
+  "CONFIRMADO",
+  "EN_PREPARACION",
+  "LISTO",
+  "ENTREGADO",
+];
 
 const DESCRIPCION_ETAPA: Record<EstadoPedido, string> = {
   REGISTRADO: "Pedido tomado por el cliente y registrado en el sistema.",
@@ -49,21 +65,26 @@ const ICONO_ETAPA: Record<EstadoPedido, string> = {
 export default function LineaTiempoPedido({
   pedido,
   onCambiarEstado,
-  disabled = false,
+  estadosPermitidos = AVANCES_COMPLETOS,
+  permiteCancelar = true,
 }: LineaTiempoPedidoProps) {
   const [procesando, setProcesando] = useState(false);
   const transiciones = TRANSICIONES_VALIDAS[pedido.estado] || [];
 
-  // Próximo estado progresivo (sin contar CANCELADO)
-  const siguienteEstado = transiciones.find((e) => e !== "CANCELADO");
-  const puedeCancelar = transiciones.includes("CANCELADO");
+  // Próximo estado progresivo que este rol puede aplicar (sin contar CANCELADO)
+  const siguienteEstado = transiciones.find(
+    (e) => e !== "CANCELADO" && estadosPermitidos.includes(e),
+  );
+  const puedeCancelar = permiteCancelar && transiciones.includes("CANCELADO");
+  // El pedido ya cerró su ciclo (ENTREGADO) o fue cancelado.
+  const finDelCiclo = transiciones.length === 0;
 
   // Índice actual en el flujo progresivo (-1 si cancelado)
   const indiceActual = CICLO_PROGRESIVO.indexOf(pedido.estado);
   const esCancelado = pedido.estado === "CANCELADO";
 
   const manejarCambio = async (nuevoEstado: EstadoPedido, motivo?: string) => {
-    if (procesando || disabled) return;
+    if (procesando) return;
     setProcesando(true);
     try {
       await onCambiarEstado(pedido.id, nuevoEstado, motivo);
@@ -188,7 +209,7 @@ export default function LineaTiempoPedido({
             <Button
               variant="danger"
               className="text-xs py-2 px-3"
-              disabled={procesando || disabled}
+              disabled={procesando}
               onClick={() => {
                 // CU-13 EX-2: la cancelación exige motivo escrito; queda en el
                 // historial del pedido y en la auditoría inalterable (HU-15).
@@ -211,7 +232,7 @@ export default function LineaTiempoPedido({
             <Button
               variant="primary"
               className="text-xs py-2 px-4 flex items-center gap-2 shadow-sm font-semibold"
-              disabled={procesando || disabled}
+              disabled={procesando}
               onClick={() => manejarCambio(siguienteEstado)}
             >
               {procesando ? (
@@ -228,14 +249,14 @@ export default function LineaTiempoPedido({
                 </>
               )}
             </Button>
-          ) : (
+          ) : finDelCiclo ? (
             <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-md border border-emerald-200 dark:border-emerald-800">
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
               Ciclo Completado
             </span>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

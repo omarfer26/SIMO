@@ -16,8 +16,10 @@ import TicketTermico, { type DatosTicket } from "@/components/ventas/TicketTermi
 import type { Cliente } from "@/lib/clientes/tipos";
 import { formatoDocumento } from "@/lib/clientes/validaciones";
 import type { ItemCanasta } from "@/lib/ventas/tipos";
-import { leerIdUsuario } from "@/lib/auth/sesion";
+import { leerIdUsuario, leerRol } from "@/lib/auth/sesion";
 import { listarUsuarios } from "@/lib/auth/authService";
+import { puedeOperarPOS } from "@/lib/auth/permisos";
+import { useRolSesion } from "@/lib/auth/useRolSesion";
 import type { UsuarioListado } from "@/lib/auth/tipos";
 import HistorialVentas from "@/components/ventas/HistorialVentas";
 import ModalAutorizarAnulacion from "@/components/ventas/ModalAutorizarAnulacion";
@@ -55,7 +57,16 @@ type AvisoPos = Omit<NotificacionNueva, "origen">;
 export default function VentasPage() {
   const { productos, origen, descontarStock, reponerStock } = useProductos();
   const { notificar } = useNotificaciones();
-  const [pestañaActiva, setPestañaActiva] = useState<"pos" | "historial">("pos");
+  // EP-03 — Solo el Vendedor opera el POS; el Administrador y el Gerente
+  // entran únicamente al historial para autorizar anulaciones. El rol vive en
+  // una cookie, así que el hook lo lee en el cliente (sin setState en efectos).
+  const rol = useRolSesion();
+  const operaPOS = puedeOperarPOS(rol);
+
+  // Pestaña que pidió el usuario. Si su rol no opera el POS se le fuerza el
+  // historial, que es la vista que ven todos los roles del módulo.
+  const [pestañaElegida, setPestañaElegida] = useState<"pos" | "historial">("pos");
+  const pestañaActiva: "pos" | "historial" = operaPOS ? pestañaElegida : "historial";
   const [busqueda, setBusqueda] = useState("");
   const [canasta, setCanasta] = useState<ItemCanasta[]>([]);
 
@@ -117,10 +128,22 @@ export default function VentasPage() {
   const [cajerosDisponibles, setCajerosDisponibles] = useState<UsuarioListado[]>([]);
   const [cargandoCajeros, setCargandoCajeros] = useState(true);
 
-  // Cargar usuarios para asociar la transacción al cajero en turno
+  // Cargar usuarios para asociar la transacción al cajero en turno.
+  // EP-03 — GET /api/users es de ADMIN y GERENTE, y un 403 cierra la sesión
+  // (apiClient.ts): al Vendedor no se le pide. Al registrar la venta el backend
+  // toma al vendedor del token, así que no necesita elegir cajero.
   useEffect(() => {
     let activo = true;
     async function cargarCajeros() {
+      const rolSesion = leerRol();
+      if (rolSesion !== "ADMIN" && rolSesion !== "GERENTE") {
+        if (!activo) return;
+        setCajerosDisponibles([]);
+        setCajeroActual(null);
+        setCargandoCajeros(false);
+        return;
+      }
+
       try {
         const lista = await listarUsuarios();
         if (!activo) return;
@@ -325,23 +348,25 @@ export default function VentasPage() {
         {/* Pestañas de Navegación y Acceso Rápido */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+            {operaPOS && (
+              <button
+                type="button"
+                onClick={() => setPestañaElegida("pos")}
+                className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                  pestañaActiva === "pos"
+                    ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                }`}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                Punto de Venta (POS)
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setPestañaActiva("pos")}
-              className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                pestañaActiva === "pos"
-                  ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
-                  : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              Punto de Venta (POS)
-            </button>
-            <button
-              type="button"
-              onClick={() => setPestañaActiva("historial")}
+              onClick={() => setPestañaElegida("historial")}
               className={`inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all ${
                 pestañaActiva === "historial"
                   ? "bg-white text-emerald-700 shadow-xs dark:bg-zinc-700 dark:text-emerald-400"
@@ -366,7 +391,7 @@ export default function VentasPage() {
                   setVentaParaAnular(ultima);
                   setModalAnularAbierto(true);
                 } else {
-                  setPestañaActiva("historial");
+                  setPestañaElegida("historial");
                   avisar({
                     variante: "aviso",
                     titulo: "No hay ventas recientes activas",
@@ -497,20 +522,23 @@ export default function VentasPage() {
                 Canasta de Compras
               </h2>
 
-              {/* Selector de Cajero / Vendedor en turno */}
-              <SelectorCajeroTurno
-                cajeroActual={cajeroActual}
-                cajerosDisponibles={cajerosDisponibles}
-                cargando={cargandoCajeros}
-                onCambiarCajero={(cajero) => {
-                  setCajeroActual(cajero);
-                  avisar({
-                    variante: "info",
-                    titulo: "Cajero en turno",
-                    detalle: cajero.nombreCompleto,
-                  });
-                }}
-              />
+              {/* Selector de Cajero / Vendedor en turno. Solo aparece si el rol
+                  puede listar usuarios (ver el efecto de arriba). */}
+              {cajerosDisponibles.length > 0 && (
+                <SelectorCajeroTurno
+                  cajeroActual={cajeroActual}
+                  cajerosDisponibles={cajerosDisponibles}
+                  cargando={cargandoCajeros}
+                  onCambiarCajero={(cajero) => {
+                    setCajeroActual(cajero);
+                    avisar({
+                      variante: "info",
+                      titulo: "Cajero en turno",
+                      detalle: cajero.nombreCompleto,
+                    });
+                  }}
+                />
+              )}
             </div>
 
             {/* SCRUM-121 (Camilo) — Aviso de canasta recuperada, con lo que

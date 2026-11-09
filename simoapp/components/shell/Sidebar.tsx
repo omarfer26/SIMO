@@ -9,9 +9,16 @@
 //    Navbar, con un fondo oscuro detrás para cerrarlo tocando afuera.
 // El módulo activo se resalta comparando la ruta actual (usePathname) contra
 // el href de cada ítem.
+//
+// El menú se arma con la matriz de lib/auth/permisos.ts: cada rol ve solo los
+// módulos a los que puede entrar, así no se le ofrece una puerta que
+// middleware.ts le va a cerrar. El rol sale de la cookie con useRolSesion()
+// (null hasta hidratar, para no romper la hidratación).
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { puedeVerRuta } from "@/lib/auth/permisos";
+import { useRolSesion } from "@/lib/auth/useRolSesion";
 import { modulos } from "./modulos";
 
 interface SidebarProps {
@@ -28,6 +35,11 @@ export default function Sidebar({
   onAlternarColapsado,
 }: SidebarProps) {
   const pathname = usePathname();
+  const rol = useRolSesion();
+
+  const visibles = rol
+    ? modulos.filter((modulo) => puedeVerRuta(rol, modulo.href))
+    : [];
 
   return (
     <>
@@ -63,7 +75,7 @@ export default function Sidebar({
         </button>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-          {modulos.map((modulo) => {
+          {visibles.map((modulo) => {
             const activo =
               modulo.href === "/"
                 ? pathname === "/"

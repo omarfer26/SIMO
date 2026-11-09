@@ -43,6 +43,12 @@ import Button from "@/components/ui/Button";
 import DataTable, { type ColumnaTabla } from "@/components/ui/DataTable";
 import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
+import {
+  estadosPermitidosPedido,
+  puedeCancelarPedido,
+  puedeConvertirPedido,
+  puedeRegistrarPedido,
+} from "@/lib/auth/permisos";
 import { leerRol } from "@/lib/auth/sesion";
 import {
   PEDIDOS_USAN_MOCK,
@@ -132,16 +138,19 @@ export default function PedidosPage() {
   // SCRUM-59 — Pedido entregado que se está convirtiendo en venta; null = modal cerrado.
   const [pedidoAConvertir, setPedidoAConvertir] = useState<Pedido | null>(null);
 
-  // Solo se lee cuando la lista ya llegó (en el navegador), porque el rol
-  // está en una cookie. Inventario consulta los pedidos, pero no los registra
-  // ni los convierte en venta: el backend le responde 403.
-  const puedeRegistrar = lista.tipo === "lista" && leerRol() !== "INVENTARIO";
-  // SCRUM-59 — Convertir en venta lo permiten los mismos roles (backend, SCRUM-62).
-  const puedeConvertir = puedeRegistrar;
-  // HU-10 — Inventario SÍ mueve el ciclo: alistar el pedido es su trabajo y
-  // PATCH /api/orders/:id/status lo acepta (VENDEDOR, INVENTARIO, GERENTE,
-  // ADMIN). Ocultarle los botones lo dejaría sin cómo preparar el pedido.
-  const puedeGestionar = lista.tipo === "lista";
+  // EP-04 — La matriz de lib/auth/permisos.ts decide quién opera el ciclo: el
+  // Vendedor registra, avanza, cancela y convierte; el Encargado de Inventario
+  // solo alista (pasa a preparación y marca listo); el Administrador y el
+  // Gerente únicamente consultan. El rol está en una cookie, que en el
+  // servidor no existe, así que se lee cuando la lista ya llegó (en el
+  // navegador).
+  const rol = lista.tipo === "lista" ? leerRol() : null;
+  const puedeRegistrar = puedeRegistrarPedido(rol);
+  // SCRUM-59 — Convertir en venta es del Vendedor, igual que en el backend.
+  const puedeConvertir = puedeConvertirPedido(rol);
+  // Estados a los que este rol puede mover un pedido (vacío = solo lectura).
+  const estadosPermitidos = estadosPermitidosPedido(rol);
+  const puedeCancelar = puedeCancelarPedido(rol);
 
   const pedidosFiltrados =
     lista.tipo === "lista" ? filtrarPorFechas(lista.pedidos, rango) : [];
@@ -476,7 +485,7 @@ export default function PedidosPage() {
                 onSeleccionarPedido={(p) => setPedidoSeleccionado(p)}
                 pedidoSeleccionadoId={pedidoSeleccionado?.id}
                 onConvertirEnVenta={puedeConvertir ? abrirConversion : undefined}
-                puedeGestionar={puedeGestionar}
+                estadosPermitidos={estadosPermitidos}
               />
             )}
 
@@ -582,7 +591,8 @@ export default function PedidosPage() {
             <LineaTiempoPedido
               pedido={pedidoSeleccionado}
               onCambiarEstado={manejarCambiarEstado}
-              disabled={!puedeGestionar}
+              estadosPermitidos={estadosPermitidos}
+              permiteCancelar={puedeCancelar}
             />
 
             {/* SCRUM-59 — Pedido entregado: su venta, o el botón para convertirlo */}

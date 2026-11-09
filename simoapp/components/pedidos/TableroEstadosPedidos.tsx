@@ -40,9 +40,19 @@ interface TableroEstadosPedidosProps {
   pedidoSeleccionadoId?: number | null;
   /** SCRUM-59 — Si no llega (rol sin permiso para vender), no se muestra el botón. */
   onConvertirEnVenta?: (pedido: Pedido) => void;
-  /** HU-10 — Si es false (p. ej. Inventario), no se ofrece avanzar estados. */
-  puedeGestionar?: boolean;
+  /** EP-04 — Estados a los que el rol de la sesión puede mover un pedido. Si
+   *  no llega, se asume el ciclo completo (Vendedor). Con la lista vacía
+   *  (Administrador y Gerente) el tablero queda en solo lectura. */
+  estadosPermitidos?: readonly EstadoPedido[];
 }
+
+// Avances del ciclo que puede aplicar el rol que opera los pedidos.
+const AVANCES_COMPLETOS: readonly EstadoPedido[] = [
+  "CONFIRMADO",
+  "EN_PREPARACION",
+  "LISTO",
+  "ENTREGADO",
+];
 
 const colorColumna: Record<EstadoPedido, { badge: BadgeVariant; border: string; headerBg: string }> = {
   REGISTRADO: {
@@ -83,7 +93,7 @@ export default function TableroEstadosPedidos({
   onSeleccionarPedido,
   pedidoSeleccionadoId,
   onConvertirEnVenta,
-  puedeGestionar = true,
+  estadosPermitidos = AVANCES_COMPLETOS,
 }: TableroEstadosPedidosProps) {
   const [actualizandoId, setActualizandoId] = useState<number | null>(null);
 
@@ -139,7 +149,12 @@ export default function TableroEstadosPedidos({
                   pedidosColumna.map((pedido) => {
                     const esSeleccionado = pedido.id === pedidoSeleccionadoId;
                     const transiciones = TRANSICIONES_VALIDAS[pedido.estado] || [];
-                    const siguienteEstado = transiciones.find((e) => e !== "CANCELADO");
+                    // Solo se ofrece el avance si el rol puede aplicarlo: el
+                    // Inventario alista (preparación y listo), el Vendedor
+                    // mueve todo el ciclo y Administrador/Gerente no mueven nada.
+                    const siguienteEstado = transiciones.find(
+                      (e) => e !== "CANCELADO" && estadosPermitidos.includes(e),
+                    );
                     const estaCargando = actualizandoId === pedido.id;
 
                     return (
@@ -183,7 +198,7 @@ export default function TableroEstadosPedidos({
                         </div>
 
                         {/* Botón rápido para avanzar al siguiente estado */}
-                        {siguienteEstado && puedeGestionar && (
+                        {siguienteEstado && (
                           <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-700/60 flex justify-end">
                             <Button
                               variant="secondary"

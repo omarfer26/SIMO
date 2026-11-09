@@ -6,12 +6,19 @@
 // poder leer `productos` del ProductosContext compartido en vez de usar
 // siempre el mock fijo — así los productos que se crean en
 // /formuProductos aparecen acá también, sin recargar la página.
+//
+// EP-02 — Los cuatro roles entran al catálogo, pero solo el Encargado de
+// Inventario lo gestiona: el botón "Nuevo producto", el traslado y el ajuste
+// de stock son suyos. El Vendedor consulta sin kardex (el kardex muestra
+// costo); Administrador y Gerente consultan todo.
 import { useState } from "react";
 import Link from "next/link";
 import BusquedaCatalogo from "@/components/catalogo/BusquedaCatalogo";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 import FormularioAjuste from "@/components/inventario/FormularioAjuste";
 import FormularioTraslado from "@/components/inventario/FormularioTraslado";
+import { puedeGestionarCatalogo, puedeVerKardex } from "@/lib/auth/permisos";
+import { useRolSesion } from "@/lib/auth/useRolSesion";
 import { NOMBRE_UBICACION } from "@/lib/inventario/validaciones";
 import { Modal } from "@/components/ui/Modal";
 
@@ -19,6 +26,12 @@ const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 
 
 export default function CatalogoPage() {
   const { productos, origen, actualizarUbicaciones } = useProductos();
+
+  // El rol vive en una cookie, que en el servidor no existe: el hook lo lee en
+  // el cliente sin provocar desajustes de hidratación.
+  const rol = useRolSesion();
+  const gestiona = puedeGestionarCatalogo(rol);
+  const verKardex = puedeVerKardex(rol);
 
   // SCRUM-124 (Camilo) — Modal de traslado Bodega → Almacén.
   // `idTraslado` se queda con el último producto aunque el modal se cierre,
@@ -55,13 +68,15 @@ export default function CatalogoPage() {
           </p>
         </div>
         {/* Antes no había ningún link a /formuProductos en toda la app: solo
-            se podía entrar escribiendo la URL a mano. */}
-        <Link
-          href="/formuProductos"
-          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          + Nuevo producto
-        </Link>
+            se podía entrar escribiendo la URL a mano. Solo lo ve Inventario. */}
+        {gestiona && (
+          <Link
+            href="/formuProductos"
+            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            + Nuevo producto
+          </Link>
+        )}
       </div>
 
       {/* SCRUM-catalogoBD (Camilo) — El catálogo viene del backend. Mientras
@@ -98,19 +113,30 @@ export default function CatalogoPage() {
             Cargando catálogo...
           </p>
         ) : (
+          // EP-02 — Sin la acción el componente no dibuja el botón.
           <BusquedaCatalogo
             productos={productos}
-            onTrasladar={(producto) => {
-              setIdTraslado(producto.id);
-              setAperturas((n) => n + 1);
-              setTrasladando(true);
-            }}
-            hrefKardex={(producto) => `/kardex?producto=${producto.id}`}
-            onAjustar={(producto) => {
-              setIdAjuste(producto.id);
-              setAperturas((n) => n + 1);
-              setAjustando(true);
-            }}
+            onTrasladar={
+              gestiona
+                ? (producto) => {
+                    setIdTraslado(producto.id);
+                    setAperturas((n) => n + 1);
+                    setTrasladando(true);
+                  }
+                : undefined
+            }
+            hrefKardex={
+              verKardex ? (producto) => `/kardex?producto=${producto.id}` : undefined
+            }
+            onAjustar={
+              gestiona
+                ? (producto) => {
+                    setIdAjuste(producto.id);
+                    setAperturas((n) => n + 1);
+                    setAjustando(true);
+                  }
+                : undefined
+            }
           />
         )}
       </div>

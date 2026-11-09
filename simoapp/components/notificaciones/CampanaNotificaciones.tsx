@@ -12,6 +12,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { puedeVerAlertasStock } from "@/lib/auth/permisos";
+import { useRolSesion } from "@/lib/auth/useRolSesion";
 import { tiempoRelativo } from "@/lib/notificaciones/formato";
 import {
   ETIQUETA_ORIGEN,
@@ -35,6 +37,10 @@ export default function CampanaNotificaciones() {
   const [abierto, setAbierto] = useState(false);
   // Hora de referencia para los "hace 3 min" de la lista.
   const [ahora, setAhora] = useState(() => Date.now());
+  // EP-05 — "Ver reposición" lleva a las alertas de stock, pero el Vendedor no
+  // tiene ese módulo: para él apunta al catálogo, que sí puede consultar.
+  const rol = useRolSesion();
+  const destinoReposicion = puedeVerAlertasStock(rol) ? "/alertas" : "/catalogo";
 
   // Abrir = ya se vieron.
   useEffect(() => {
@@ -200,11 +206,11 @@ export default function CampanaNotificaciones() {
 
             <div className="flex items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/40">
               <Link
-                href="/"
+                href={destinoReposicion}
                 onClick={() => setAbierto(false)}
                 className="text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
               >
-                Ver reposición en el tablero
+                Ver reposición
               </Link>
               <Link
                 href="/catalogo"

@@ -12,6 +12,7 @@
 // quien decide qué puede hacer cada uno es el token, en el backend.
 
 import { borrarCanastaGuardada } from "@/lib/ventas/canastaGuardada";
+import { esRolValido } from "./permisos";
 import type { CodigoRol, SesionIniciada } from "./tipos";
 
 // El backend firma el JWT con 8 horas de vida; la cookie dura lo mismo.
@@ -63,5 +64,5 @@ export function leerIdUsuario(): number | null {
 // la sesión, ver apiClient.ts); quien da el permiso sigue siendo el token.
 export function leerRol(): CodigoRol | null {
   const rol = leerCookie("role");
-  return rol === "ADMIN" || rol === "GERENTE" || rol === "INVENTARIO" || rol === "VENDEDOR" ? rol : null;
+  return esRolValido(rol) ? rol : null;
 }

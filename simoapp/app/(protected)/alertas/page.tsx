@@ -1,8 +1,12 @@
 import VistaAlertasAuditoria from "@/components/alertas/VistaAlertasAuditoria";
 
 // HU-15 — Módulo "Alertas y Auditoría". Página delgada (Server Component, como
-// /kardex): encabezado + contenedor con pestañas (Log de Auditoría | Reportes).
-// Solo ADMIN y GERENTE llegan acá; a los demás los redirige middleware.ts.
+// /kardex): encabezado + contenedor con pestañas (Alertas de stock | Log de
+// Auditoría | Reportes).
+// EP-05 — Entran ADMIN, GERENTE e INVENTARIO: el Inventario solo ve las
+// alertas de stock; Auditoría y Reportes son del Administrador y del Gerente
+// (los filtra VistaAlertasAuditoria.tsx). El Vendedor lo redirige
+// middleware.ts.
 export default function AlertasPage() {
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-10 sm:px-8">
@@ -11,8 +15,9 @@ export default function AlertasPage() {
           Alertas y Auditoría
         </h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Consulta el log de auditoría inalterable (cancelaciones y ajustes
-          manuales de existencias) y descarga reportes en Excel, PDF o Word.
+          Revisa los productos que requieren reposición, consulta el log de
+          auditoría inalterable (cancelaciones y ajustes manuales de
+          existencias) y descarga reportes en Excel, PDF o Word.
         </p>
       </div>
       <VistaAlertasAuditoria />

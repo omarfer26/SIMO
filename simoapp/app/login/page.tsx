@@ -16,6 +16,7 @@ import Button from "@/components/ui/Button";
 import InputText from "@/components/ui/InputText";
 import { Spinner } from "@/components/ui/Spinner";
 import { iniciarSesion, mensajeDeError } from "@/lib/auth/authService";
+import { inicioDe } from "@/lib/auth/permisos";
 import { guardarSesion } from "@/lib/auth/sesion";
 import type { CredencialesLogin } from "@/lib/auth/tipos";
 import { validarLogin, type Errores } from "@/lib/auth/validaciones";
@@ -50,8 +51,9 @@ export default function LoginPage() {
       // Usamos window.location.href en lugar de router.push(): fuerza una
       // petición real al servidor para que middleware.ts vea la cookie nueva.
       // No se apaga `enviando`: el botón sigue bloqueado hasta que cambia la
-      // página.
-      window.location.href = "/";
+      // página. Cada rol aterriza en su propio inicio (el Vendedor no tiene
+      // Dashboard: entra al POS y el Inventario al catálogo).
+      window.location.href = inicioDe(sesion.usuario.rol);
     } catch (error) {
       setErrorGeneral(mensajeDeError(error));
       setEnviando(false);
