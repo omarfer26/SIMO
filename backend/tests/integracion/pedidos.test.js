@@ -1,12 +1,11 @@
 // tests/integracion/pedidos.test.js
-// Pruebas de integración del ciclo secuencial de pedidos y la reserva de
-// stock en preparación (HU-10 / CU-12 / CU-13).
-// Requieren la base creada con db/00_init.sh (migraciones + seed) y las
-// variables DB_* (o DATABASE_URL) del .env. Levantan index.js en un puerto aparte.
+// Pruebas de integración del registro y consulta de pedidos (SCRUM-81 / HU-10).
+// Requieren la base con migraciones y seed, y DATABASE_URL o DB_* del .env.
+// Levantan index.js en un puerto aparte.
 //
-// Los productos y el cliente de prueba se crean con marca de tiempo propia y
-// al terminar quedan inactivos. Los pedidos, sus movimientos de inventario y
-// el historial NO se borran: son inalterables por diseño (RF-18, RN-04).
+// El historial de pedidos es inalterable, así que los pedidos no se borran:
+// cada ejecución crea su propio cliente y productos (sufijo con marca de
+// tiempo) y al terminar los deja inactivos.
 //
 //   npm run test:integracion
 const { test } = require('node:test');
@@ -16,56 +15,31 @@ const path = require('node:path');
 const pool = require('../../src/config/db');
 const { iniciarSesion } = require('./sesion');
 
-const PORT = process.env.TEST_PORT_PEDIDOS || 3998;
-const BASE = `http://localhost:${PORT}/api`;
+const PORT = process.env.TEST_PORT_PEDIDOS || 3995;
+const BASE = `http://localhost:${PORT}/api/orders`;
 const SUFIJO = String(Date.now()).slice(-8);
-const SKU_A = `HU10-A-${SUFIJO}`;
-const SKU_B = `HU10-B-${SUFIJO}`;
-const DOC = `88${SUFIJO}`;
-const DOC_INACTIVO = `89${SUFIJO}`;
-const MOTIVO = 'El cliente desistió de la compra';
 let servidor;
 const ref = {};
 const casos = [];
 const caso = (nombre, fn) => casos.push([nombre, fn]);
 
-let token; // Vendedor: actor principal de HU-10
-let tokenInventario; // Consulta pedidos, no los gestiona
+let token; // sesión del Vendedor (seed), quien registra los pedidos
 
-// Día de hoy en Colombia, en formato AAAA-MM-DD (el backend rechaza el pasado).
-function hoyEnColombia() {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
-}
-
-async function api(ruta = '', opciones = {}, usarToken = token) {
+async function api(ruta = '', { metodo = 'GET', cuerpo, tokenSesion = token } = {}) {
     const res = await fetch(`${BASE}${ruta}`, {
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${usarToken}` },
-        ...opciones,
+        method: metodo,
+        headers: { 'Content-Type': 'application/json', ...(tokenSesion ? { Authorization: `Bearer ${tokenSesion}` } : {}) },
+        ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
     });
     return { status: res.status, body: await res.json() };
 }
+const registrar = (cuerpo, tokenSesion) => api('', { metodo: 'POST', cuerpo, tokenSesion });
+const cambiarEstado = (id, cuerpo, tokenSesion) => api(`/${id}/status`, { metodo: 'PATCH', cuerpo, tokenSesion });
 
-const crearPedido = (cuerpo) => api('/orders', { method: 'POST', body: JSON.stringify(cuerpo) });
-const cambiarEstado = (id, estado, motivo) =>
-    api(`/orders/${id}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify(motivo === undefined ? { estado } : { estado, motivo }),
-    });
-
-function pedidoValido(lineas) {
-    return {
-        id_cliente: ref.cliente,
-        fecha_entrega_pactada: hoyEnColombia(),
-        direccion_entrega: 'Calle 10 # 5-20',
-        observaciones: 'Prueba de integración HU-10',
-        lineas,
-    };
-}
-
-async function stockDe(idProducto) {
+async function stock(producto) {
     const { rows } = await pool.query(
-        `SELECT stock_bodega, stock_almacen, stock_total FROM productos WHERE id_producto = $1`,
-        [idProducto]
+        'SELECT stock_bodega::float AS bodega, stock_almacen::float AS almacen FROM productos WHERE id_producto = $1',
+        [producto.id_producto]
     );
     return rows[0];
 }
@@ -132,302 +106,378 @@ async function preparar() {
         servidor.stdout.on('data', (d) => d.toString().includes('corriendo') && resolve());
         servidor.on('exit', (code) => reject(new Error(`El servidor terminó con código ${code}`)));
     });
-
     token = await iniciarSesion(PORT, 'vendedor@simo.local');
-    tokenInventario = await iniciarSesion(PORT, 'inventario@simo.local');
-
-    // --- Productos de prueba ---
-    // A queda con stock solo en Bodega (entra por la función oficial de HU-05)
-    // y B con stock solo en Almacén (atajo de la prueba) para ver la cascada.
-    const crearProducto = async (sku, nombre, precioVenta) => {
-        const { rows } = await pool.query(
-            `INSERT INTO productos (id_categoria, id_unidad, sku, nombre, precio_compra, precio_venta)
-             VALUES ((SELECT min(id_categoria) FROM categorias),
-                     (SELECT id_unidad FROM unidades_medida WHERE abreviatura = 'und'),
-                     $1, $2, 1000, $3)
-             RETURNING id_producto`,
-            [sku, nombre, precioVenta]
-        );
-        return rows[0].id_producto;
-    };
-    ref.productoA = await crearProducto(SKU_A, 'Producto HU-10 A', 12000);
-    ref.productoB = await crearProducto(SKU_B, 'Producto HU-10 B', 8000);
-
-    await pool.query(`SELECT * FROM fn_registrar_ingreso_bodega($1, 10, $2, NULL, NULL, NULL, 'Prueba HU-10')`, [
-        ref.productoA,
-        ref.vendedor,
-    ]);
-    await pool.query(`UPDATE productos SET stock_almacen = 5 WHERE id_producto = $1`, [ref.productoB]);
-
-    // --- Cliente activo e inactivo ---
-    const cliente = await api('/customers', {
-        method: 'POST',
-        body: JSON.stringify({ identificacion: DOC, nombre: 'Cliente HU-10' }),
-    });
-    assert.equal(cliente.status, 201, 'no se pudo crear el cliente de prueba');
-    ref.cliente = cliente.body.cliente.id_cliente;
-
-    const inactivo = await api('/customers', {
-        method: 'POST',
-        body: JSON.stringify({ identificacion: DOC_INACTIVO, nombre: 'Cliente HU-10 Inactivo' }),
-    });
-    ref.clienteInactivo = inactivo.body.cliente.id_cliente;
-    await api(`/customers/${ref.clienteInactivo}`, { method: 'PUT', body: JSON.stringify({ estado: false }) });
 }
 
 async function limpiar() {
-    await pool.query(`UPDATE productos SET estado = FALSE WHERE sku IN ($1, $2)`, [SKU_A, SKU_B]);
-    await pool.query(`UPDATE clientes SET estado = FALSE WHERE identificacion IN ($1, $2)`, [DOC, DOC_INACTIVO]);
+    await pool.query(`UPDATE productos SET estado = FALSE WHERE sku LIKE $1`, [`TEST-PED-%-${SUFIJO}`]);
+    await pool.query(`UPDATE clientes SET estado = FALSE WHERE identificacion LIKE $1`, [`66${SUFIJO}%`]);
     await pool.end();
     servidor.kill();
 }
 
-// ------------------------------- Registro -------------------------------
+const pedidoValido = () => ({
+    id_cliente: ref.cliente,
+    fecha_entrega_pactada: diaColombia(3),
+    direccion_entrega: 'Calle 10 # 5-20, Cúcuta',
+    observaciones: 'Entregar en la mañana',
+    lineas: [{ id_producto: ref.und.id_producto, cantidad: 3 }, { sku: ref.kg.sku, cantidad: '1.25' }],
+});
 
-caso('Registra un pedido: nace REGISTRADO y el total lo calcula la base (CU-12)', async () => {
-    const { status, body } = await crearPedido(
-        pedidoValido([
-            { id_producto: ref.productoA, cantidad: 2 },
-            { id_producto: ref.productoB, cantidad: 1 },
-        ])
-    );
+// --------------------------------- Registro ---------------------------------
+
+caso('Registra el pedido en REGISTRADO con precios vigentes, total e historial', async () => {
+    const { status, body } = await registrar(pedidoValido());
     assert.equal(status, 201);
-    assert.equal(body.pedido.estado, 'REGISTRADO');
-    assert.equal(body.pedido.stock_reservado, false);
-    assert.equal(Number(body.pedido.total), 2 * 12000 + 8000);
-    assert.equal(body.pedido.nombre_cliente, 'Cliente HU-10');
-    assert.equal(body.pedido.nombre_usuario, 'Vendedor SIMO');
-    assert.equal(body.pedido.id_venta, null);
-    assert.equal(body.advertencia, null);
-    ref.pedido1 = body.pedido.id_pedido;
+    const p = body.pedido;
+    ref.pedido = p.id_pedido;
+    assert.equal(p.estado, 'REGISTRADO');
+    assert.equal(p.id_cliente, ref.cliente);
+    assert.equal(p.id_usuario, ref.vendedor);
+    assert.equal(p.nombre_usuario, 'Vendedor SIMO');
+    assert.equal(p.direccion_entrega, 'Calle 10 # 5-20, Cúcuta');
+    assert.equal(p.lineas.length, 2);
+    assert.equal(Number(p.lineas[0].precio_unitario), 2500);
+    assert.equal(Number(p.lineas[1].subtotal_linea), 5000);
+    assert.equal(Number(p.total), 3 * 2500 + 1.25 * 4000);
+    assert.equal(p.vencido, false);
+    assert.deepEqual(p.historial.map((h) => [h.estado_anterior, h.estado_nuevo, h.id_usuario]), [[null, 'REGISTRADO', ref.vendedor]]);
 });
 
-caso('Avisa (sin bloquear) cuando hoy no alcanza el stock', async () => {
-    const { status, body } = await crearPedido(pedidoValido([{ id_producto: ref.productoA, cantidad: 999 }]));
+caso('Una fecha sin hora se pacta para el final de ese día en hora de Colombia', async () => {
+    const { body } = await api(`/${ref.pedido}`);
+    assert.equal(new Date(body.pedido.fecha_entrega_pactada).toISOString(), new Date(`${diaColombia(3)}T23:59:59.999-05:00`).toISOString());
+});
+
+caso('Registrar no descuenta stock; avisa si hoy no alcanza', async () => {
+    const { rows } = await pool.query('SELECT stock_total::float AS s FROM productos WHERE id_producto = $1', [ref.und.id_producto]);
+    assert.equal(rows[0].s, 0);
+    const { body } = await registrar({ ...pedidoValido(), lineas: [{ id_producto: ref.und.id_producto, cantidad: 1 }] });
+    assert.match(body.advertencia, /no alcanza el stock/);
+    assert.equal(body.pedido.lineas[0].disponible, false);
+});
+
+caso('Ignora un precio enviado por el cliente: usa el precio de venta del producto', async () => {
+    const { status, body } = await registrar({
+        ...pedidoValido(), lineas: [{ id_producto: ref.und.id_producto, cantidad: 2, precio_unitario: 1 }],
+    });
     assert.equal(status, 201);
-    assert.ok(body.advertencia && body.advertencia.includes('no alcanza el stock'), body.advertencia);
-    ref.pedidoSinStock = body.pedido.id_pedido;
+    assert.equal(Number(body.pedido.total), 5000);
 });
 
-caso('Valida los datos del pedido (400 / 404 / 409)', async () => {
-    const sinLineas = await crearPedido({ ...pedidoValido([]) });
-    assert.equal(sinLineas.status, 400);
-
-    const fechaPasada = await crearPedido({
-        ...pedidoValido([{ id_producto: ref.productoA, cantidad: 1 }]),
-        fecha_entrega_pactada: '2000-01-01',
-    });
-    assert.equal(fechaPasada.status, 400);
-
-    const fechaInvalida = await crearPedido({
-        ...pedidoValido([{ id_producto: ref.productoA, cantidad: 1 }]),
-        fecha_entrega_pactada: '2026-02-31',
-    });
-    assert.equal(fechaInvalida.status, 400);
-
-    const cantidadCero = await crearPedido(pedidoValido([{ id_producto: ref.productoA, cantidad: 0 }]));
-    assert.equal(cantidadCero.status, 400);
-
-    const repetido = await crearPedido(
-        pedidoValido([
-            { id_producto: ref.productoA, cantidad: 1 },
-            { id_producto: ref.productoA, cantidad: 2 },
-        ])
-    );
-    assert.equal(repetido.status, 400);
-
-    const clienteInexistente = await crearPedido({
-        ...pedidoValido([{ id_producto: ref.productoA, cantidad: 1 }]),
-        id_cliente: 99999999,
-    });
-    assert.equal(clienteInexistente.status, 404);
-
-    const productoInexistente = await crearPedido(pedidoValido([{ id_producto: 99999999, cantidad: 1 }]));
-    assert.equal(productoInexistente.status, 404);
-
-    const clienteInactivo = await crearPedido({
-        ...pedidoValido([{ id_producto: ref.productoA, cantidad: 1 }]),
-        id_cliente: ref.clienteInactivo,
-    });
-    assert.equal(clienteInactivo.status, 409);
+caso('Valida cliente, fecha, textos y líneas (400)', async () => {
+    const base = pedidoValido();
+    const malos = [
+        { id_cliente: undefined }, { id_cliente: 'x' },
+        { fecha_entrega_pactada: undefined }, { fecha_entrega_pactada: 'mañana' }, { fecha_entrega_pactada: '2026-02-30' },
+        { fecha_entrega_pactada: diaColombia(-1) },
+        { direccion_entrega: 'x'.repeat(201) }, { observaciones: 5 },
+        { lineas: [] }, { lineas: 'x' },
+        { lineas: [{ id_producto: ref.und.id_producto, cantidad: 0 }] },
+        { lineas: [{ id_producto: ref.und.id_producto, cantidad: 1.2345 }] },
+        { lineas: [{ cantidad: 1 }] },
+        { lineas: [{ id_producto: ref.und.id_producto, cantidad: 1 }, { id_producto: ref.und.id_producto, cantidad: 2 }] },
+        { lineas: [{ id_producto: ref.und.id_producto, cantidad: 1.5 }] }, // producto por unidad (regla de la base, 015)
+    ];
+    for (const cambio of malos) {
+        const r = await registrar({ ...base, ...cambio });
+        assert.equal(r.status, 400, JSON.stringify(cambio));
+        assert.ok(r.body.message);
+    }
 });
 
-// --------------------------- Ciclo secuencial ---------------------------
-
-caso('No permite saltar de REGISTRADO a EN_PREPARACION (CU-12 CA-2)', async () => {
-    const salto = await cambiarEstado(ref.pedido1, 'EN_PREPARACION');
-    assert.equal(salto.status, 409);
-
-    const { body } = await api(`/orders/${ref.pedido1}`);
-    assert.equal(body.pedido.estado, 'REGISTRADO');
-
-    const stock = await stockDe(ref.productoA);
-    assert.equal(Number(stock.stock_bodega), 10, 'el stock no debió moverse si el cambio fue rechazado');
+caso('404 si el cliente o un producto no existen; 409 si están inactivos', async () => {
+    assert.equal((await registrar({ ...pedidoValido(), id_cliente: 99999999 })).status, 404);
+    assert.equal((await registrar({ ...pedidoValido(), lineas: [{ id_producto: 99999999, cantidad: 1 }] })).status, 404);
+    assert.equal((await registrar({ ...pedidoValido(), lineas: [{ sku: 'NO-EXISTE-XYZ', cantidad: 1 }] })).status, 404);
+    assert.equal((await registrar({ ...pedidoValido(), id_cliente: ref.clienteInactivo })).status, 409);
+    assert.equal((await registrar({ ...pedidoValido(), lineas: [{ id_producto: ref.inactivo.id_producto, cantidad: 1 }] })).status, 409);
 });
 
-caso('No acepta estados inventados ni volver a REGISTRADO', async () => {
-    assert.equal((await cambiarEstado(ref.pedido1, 'EN_CAMINO')).status, 400);
-    assert.equal((await cambiarEstado(ref.pedido1, 'REGISTRADO')).status, 400);
-    assert.equal((await api('/orders/99999999/status', { method: 'PATCH', body: JSON.stringify({ estado: 'CONFIRMADO' }) })).status, 404);
-    assert.equal((await api('/orders/abc/status', { method: 'PATCH', body: JSON.stringify({ estado: 'CONFIRMADO' }) })).status, 400);
+caso('Un pedido rechazado no deja nada a medias', async () => {
+    const antes = (await pool.query('SELECT count(*)::int AS n FROM pedidos WHERE id_cliente = $1', [ref.cliente])).rows[0].n;
+    await registrar({ ...pedidoValido(), lineas: [{ id_producto: ref.und.id_producto, cantidad: 1 }, { id_producto: ref.inactivo.id_producto, cantidad: 1 }] });
+    const despues = (await pool.query('SELECT count(*)::int AS n FROM pedidos WHERE id_cliente = $1', [ref.cliente])).rows[0].n;
+    assert.equal(despues, antes);
 });
 
-caso('Avanza un paso a la vez: CONFIRMADO -> EN_PREPARACION reserva el stock (HU-10)', async () => {
-    const confirmado = await cambiarEstado(ref.pedido1, 'CONFIRMADO');
-    assert.equal(confirmado.status, 200);
-    assert.equal(confirmado.body.pedido.estado, 'CONFIRMADO');
-    assert.equal(confirmado.body.pedido.stock_reservado, false);
+// --------------------------------- Consulta ---------------------------------
 
-    const preparacion = await cambiarEstado(ref.pedido1, 'EN_PREPARACION');
-    assert.equal(preparacion.status, 200);
-    assert.equal(preparacion.body.pedido.estado, 'EN_PREPARACION');
-    assert.equal(preparacion.body.pedido.stock_reservado, true);
-
-    // Cascada: A sale de Bodega y B de Almacén.
-    const stockA = await stockDe(ref.productoA);
-    const stockB = await stockDe(ref.productoB);
-    assert.equal(Number(stockA.stock_bodega), 8);
-    assert.equal(Number(stockB.stock_almacen), 4);
-
-    const salidas = (await movimientosDe(ref.pedido1)).filter((m) => m.tipo_movimiento === 'SALIDA_PEDIDO');
-    assert.equal(salidas.length, 2);
-    assert.deepEqual(salidas.map((m) => m.ubicacion_origen).sort(), ['ALMACEN', 'BODEGA']);
-});
-
-caso('No retrocede de EN_PREPARACION a CONFIRMADO', async () => {
-    assert.equal((await cambiarEstado(ref.pedido1, 'CONFIRMADO')).status, 409);
-    const { body } = await api(`/orders/${ref.pedido1}`);
-    assert.equal(body.pedido.estado, 'EN_PREPARACION');
-});
-
-caso('Completa el ciclo hasta ENTREGADO y ya no admite cambios', async () => {
-    assert.equal((await cambiarEstado(ref.pedido1, 'LISTO')).status, 200);
-    const entregado = await cambiarEstado(ref.pedido1, 'ENTREGADO');
-    assert.equal(entregado.status, 200);
-    assert.equal(entregado.body.pedido.estado, 'ENTREGADO');
-
-    assert.equal((await cambiarEstado(ref.pedido1, 'CANCELADO', MOTIVO)).status, 409);
-    assert.equal((await cambiarEstado(ref.pedido1, 'LISTO')).status, 409);
-});
-
-caso('El historial guarda cada cambio con su usuario (RF-18)', async () => {
-    const { rows } = await pool.query(
-        `SELECT estado_anterior, estado_nuevo, id_usuario
-         FROM historial_estados_pedido WHERE id_pedido = $1 ORDER BY id_historial`,
-        [ref.pedido1]
-    );
-    assert.deepEqual(
-        rows.map((r) => r.estado_nuevo),
-        ['REGISTRADO', 'CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO']
-    );
-    assert.ok(rows.every((r) => r.id_usuario === ref.vendedor));
-});
-
-// ------------------------------ Cancelación ------------------------------
-
-caso('Cancelar exige motivo y devuelve el stock reservado (CU-13)', async () => {
-    const creado = await crearPedido(pedidoValido([{ id_producto: ref.productoA, cantidad: 2 }]));
-    const id = creado.body.pedido.id_pedido;
-    ref.pedido2 = id;
-
-    assert.equal((await cambiarEstado(id, 'CONFIRMADO')).status, 200);
-    assert.equal((await cambiarEstado(id, 'EN_PREPARACION')).status, 200);
-    assert.equal(Number((await stockDe(ref.productoA)).stock_bodega), 8 - 2);
-
-    // CU-13 EX-2: sin motivo no se cancela.
-    assert.equal((await cambiarEstado(id, 'CANCELADO')).status, 400);
-    assert.equal((await cambiarEstado(id, 'CANCELADO', '   ')).status, 400);
-
-    const cancelado = await cambiarEstado(id, 'CANCELADO', MOTIVO);
-    assert.equal(cancelado.status, 200);
-    assert.equal(cancelado.body.pedido.estado, 'CANCELADO');
-    assert.equal(cancelado.body.pedido.stock_reservado, false);
-
-    // El stock vuelve a la ubicación de origen.
-    assert.equal(Number((await stockDe(ref.productoA)).stock_bodega), 8);
-    const reversos = (await movimientosDe(id)).filter((m) => m.tipo_movimiento === 'REVERSO_PEDIDO');
-    assert.equal(reversos.length, 1);
-    assert.equal(reversos[0].ubicacion_destino, 'BODEGA');
-
-    // El motivo queda en el historial y en la auditoría inalterable (HU-15).
-    const { rows: historial } = await pool.query(
-        `SELECT motivo FROM historial_estados_pedido WHERE id_pedido = $1 AND estado_nuevo = 'CANCELADO'`,
-        [id]
-    );
-    assert.equal(historial[0].motivo, MOTIVO);
-
-    const { rows: auditoria } = await pool.query(
-        `SELECT accion, justificacion FROM log_auditoria WHERE entidad = 'pedidos' AND id_entidad = $1`,
-        [id]
-    );
-    assert.equal(auditoria.length, 1);
-    assert.equal(auditoria[0].accion, 'CANCELACION_PEDIDO');
-    assert.equal(auditoria[0].justificacion, MOTIVO);
-});
-
-caso('Cancelar antes de preparar no mueve stock ni genera reverso', async () => {
-    const creado = await crearPedido(pedidoValido([{ id_producto: ref.productoA, cantidad: 1 }]));
-    const id = creado.body.pedido.id_pedido;
-    assert.equal((await cambiarEstado(id, 'CANCELADO', MOTIVO)).status, 200);
-    assert.equal((await movimientosDe(id)).length, 0);
-});
-
-caso('Si el stock no alcanza, rechaza la reserva y deja el pedido en CONFIRMADO', async () => {
-    assert.equal((await cambiarEstado(ref.pedidoSinStock, 'CONFIRMADO')).status, 200);
-
-    const intento = await cambiarEstado(ref.pedidoSinStock, 'EN_PREPARACION');
-    assert.equal(intento.status, 409);
-    assert.match(intento.body.message, /Stock insuficiente/);
-
-    const { body } = await api(`/orders/${ref.pedidoSinStock}`);
-    assert.equal(body.pedido.estado, 'CONFIRMADO');
-    assert.equal(Number((await stockDe(ref.productoA)).stock_bodega), 8);
-});
-
-// -------------------------------- Roles ---------------------------------
-
-caso('Inventario consulta pedidos pero no los gestiona (403)', async () => {
-    const lista = await api('/orders', {}, tokenInventario);
-    assert.equal(lista.status, 200);
-    assert.ok(lista.body.data.some((p) => p.id_pedido === ref.pedido1));
-
-    const cambio = await api(
-        `/orders/${ref.pedidoSinStock}/status`,
-        { method: 'PATCH', body: JSON.stringify({ estado: 'EN_PREPARACION' }) },
-        tokenInventario
-    );
-    assert.equal(cambio.status, 403);
-
-    const registro = await api(
-        '/orders',
-        { method: 'POST', body: JSON.stringify(pedidoValido([{ id_producto: ref.productoA, cantidad: 1 }])) },
-        tokenInventario
-    );
-    assert.equal(registro.status, 403);
-});
-
-// ------------------------------- Consulta -------------------------------
-
-caso('Lista los pedidos y filtra por el día de Colombia', async () => {
-    const { status, body } = await api('/orders');
+caso('GET /api/orders con el contrato del frontend (SCRUM-125) y filtros', async () => {
+    const { status, body } = await api(`?id_cliente=${ref.cliente}`);
     assert.equal(status, 200);
-    const fila = body.data.find((p) => p.id_pedido === ref.pedido1);
-    assert.ok(fila);
-    assert.equal(fila.nombre_cliente, 'Cliente HU-10');
-    assert.equal(fila.estado, 'ENTREGADO');
-    assert.equal(fila.stock_reservado, true);
+    assert.equal(body.data.length, 3);
+    for (const campo of ['id_pedido', 'nombre_cliente', 'nombre_usuario', 'estado', 'fecha_solicitud', 'fecha_entrega_pactada', 'total']) {
+        assert.ok(body.data[0][campo] !== undefined, `falta ${campo}`);
+    }
+    assert.ok(body.data.every((p, i) => i === 0 || new Date(p.fecha_solicitud) <= new Date(body.data[i - 1].fecha_solicitud)));
+    const hoy = diaColombia();
+    assert.equal((await api(`?id_cliente=${ref.cliente}&desde=${hoy}&hasta=${hoy}`)).body.data.length, 3);
+    assert.equal((await api(`?id_cliente=${ref.cliente}&desde=${diaColombia(1)}`)).body.data.length, 0);
+    assert.equal((await api(`?id_cliente=${ref.cliente}&estado=registrado`)).body.data.length, 3);
+    assert.equal((await api(`?id_cliente=${ref.cliente}&estado=ENTREGADO`)).body.data.length, 0);
+    for (const q of ['?estado=PERDIDO', '?desde=ayer', '?id_cliente=x', `?desde=${diaColombia(1)}&hasta=${hoy}`]) {
+        assert.equal((await api(q)).status, 400, q);
+    }
+});
 
-    const hoy = hoyEnColombia();
-    const delDia = await api(`/orders?desde=${hoy}&hasta=${hoy}`);
-    assert.equal(delDia.status, 200);
-    assert.ok(delDia.body.data.some((p) => p.id_pedido === ref.pedido1));
+caso('GET /api/orders/:id: 404 si no existe y 400 si el id es inválido', async () => {
+    assert.equal((await api('/99999999')).status, 404);
+    assert.equal((await api('/abc')).status, 400);
+});
 
-    assert.equal((await api('/orders?desde=2026-02-31')).status, 400);
-    assert.equal((await api(`/orders?desde=${hoy}&hasta=2000-01-01`)).status, 400);
+caso('Roles: registra Vendedor/Gerente/Admin; Inventario consulta pero no registra', async () => {
+    assert.equal((await registrar(pedidoValido(), null)).status, 401);
+    const inventario = await iniciarSesion(PORT, 'inventario@simo.local');
+    assert.equal((await registrar(pedidoValido(), inventario)).status, 403);
+    assert.equal((await api(`/${ref.pedido}`, { tokenSesion: inventario })).status, 200);
+    const gerente = await iniciarSesion(PORT, 'gerente@simo.local');
+    assert.equal((await registrar({ ...pedidoValido(), lineas: [{ id_producto: ref.kg.id_producto, cantidad: 2 }] }, gerente)).status, 201);
+});
+
+// ------------------------------ Cambio de estado (SCRUM-61) ------------------------------
+
+caso('Ciclo completo con el contrato del frontend: descuenta stock solo al pasar a EN_PREPARACION', async () => {
+    const id = await pedidoDe(ref.stock, 5);
+    const inventario = await iniciarSesion(PORT, 'inventario@simo.local');
+
+    const confirmado = await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    assert.equal(confirmado.status, 200);
+    assert.equal(confirmado.body.estado, 'CONFIRMADO');           // el front lee data.estado
+    assert.deepEqual(await stock(ref.stock), { bodega: 7, almacen: 3 });
+
+    const preparado = await cambiarEstado(id, { estado: 'en_preparacion' }, inventario);
+    assert.equal(preparado.status, 200);
+    assert.equal(preparado.body.estado, 'EN_PREPARACION');
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 }); // 3 del Almacén y 2 de Bodega
+
+    for (const estado of ['LISTO', 'ENTREGADO']) {
+        assert.equal((await cambiarEstado(id, { estado }, inventario)).status, 200);
+    }
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 });
+    const { body } = await api(`/${id}`);
+    assert.deepEqual(body.pedido.historial.map((h) => h.estado_nuevo), ['REGISTRADO', 'CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO']);
+    assert.equal(body.pedido.historial[2].nombre_usuario, 'Encargado Inventario');
+
+    const { rows } = await pool.query(
+        `SELECT ubicacion_origen, cantidad::float FROM movimientos_inventario
+         WHERE id_pedido = $1 AND tipo_movimiento = 'SALIDA_PEDIDO' ORDER BY id_movimiento`, [id]);
+    assert.deepEqual(rows, [{ ubicacion_origen: 'ALMACEN', cantidad: 3 }, { ubicacion_origen: 'BODEGA', cantidad: 2 }]);
+    ref.entregado = id;
+});
+
+caso('Transiciones inválidas (409) y datos inválidos (400/404)', async () => {
+    const id = await pedidoDe(ref.kg, 1);
+    assert.equal((await cambiarEstado(id, { estado: 'LISTO' })).status, 409);        // salta estados
+    assert.equal((await cambiarEstado(ref.entregado, { estado: 'CONFIRMADO' })).status, 409);
+    assert.equal((await cambiarEstado(ref.entregado, { estado: 'CANCELADO', motivo: 'tarde' })).status, 409);
+    for (const cuerpo of [{}, { estado: 'PERDIDO' }, { estado: 'REGISTRADO' }, { estado: 5 }, { estado: 'CONFIRMADO', motivo: 7 }]) {
+        assert.equal((await cambiarEstado(id, cuerpo)).status, 400, JSON.stringify(cuerpo));
+    }
+    assert.equal((await cambiarEstado(99999999, { estado: 'CONFIRMADO' })).status, 404);
+    assert.equal((await api('/abc/status', { metodo: 'PATCH', cuerpo: { estado: 'CONFIRMADO' } })).status, 400);
+    const r = await cambiarEstado(id, { estado: 'LISTO' });
+    assert.match(r.body.message, /secuencial/);
+});
+
+caso('Cancelar exige motivo y devuelve el stock a su ubicación', async () => {
+    const id = await pedidoDe(ref.stock, 4);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    assert.equal((await cambiarEstado(id, { estado: 'EN_PREPARACION' })).status, 200);
+    assert.deepEqual(await stock(ref.stock), { bodega: 1, almacen: 0 });
+
+    const sinMotivo = await cambiarEstado(id, { estado: 'CANCELADO' });
+    assert.equal(sinMotivo.status, 400);
+    assert.equal(sinMotivo.body.message, 'La causa de cancelación es obligatoria.');
+    const cancelado = await cambiarEstado(id, { estado: 'CANCELADO', motivo: 'El cliente desistió' });
+    assert.equal(cancelado.status, 200);
+    assert.equal(cancelado.body.estado, 'CANCELADO');
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 });
+    const { body } = await api(`/${id}`);
+    assert.equal(body.pedido.historial.at(-1).motivo, 'El cliente desistió');
+    const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.stock.id_producto]);
+    assert.equal(rows[0].consistente, true);
+});
+
+caso('Sin stock suficiente responde 409 y el pedido no avanza', async () => {
+    const id = await pedidoDe(ref.stock, 6);   // hay 5
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    const r = await cambiarEstado(id, { estado: 'EN_PREPARACION' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /Stock insuficiente/);
+    assert.equal((await api(`/${id}`)).body.pedido.estado, 'CONFIRMADO');
+    assert.deepEqual(await stock(ref.stock), { bodega: 5, almacen: 0 });
+});
+
+caso('Dos pedidos que se preparan a la vez por el mismo stock: solo uno lo obtiene', async () => {
+    const a = await pedidoDe(ref.disputado, 6);
+    const b = await pedidoDe(ref.disputado, 6);    // hay 10: no alcanzan los dos
+    await cambiarEstado(a, { estado: 'CONFIRMADO' });
+    await cambiarEstado(b, { estado: 'CONFIRMADO' });
+    const respuestas = await Promise.all([a, b].map((id) => cambiarEstado(id, { estado: 'EN_PREPARACION' })));
+    assert.deepEqual(respuestas.map((r) => r.status).sort(), [200, 409]);
+    assert.deepEqual(await stock(ref.disputado), { bodega: 4, almacen: 0 });
+    const { rows } = await pool.query('SELECT consistente FROM fn_validar_kardex($1)', [ref.disputado.id_producto]);
+    assert.equal(rows[0].consistente, true);
+});
+
+caso('Cambio de estado: exige sesión; /estado es alias', async () => {
+    const id = await pedidoDe(ref.kg, 1);
+    assert.equal((await cambiarEstado(id, { estado: 'CONFIRMADO' }, null)).status, 401);
+    assert.equal((await api(`/${id}/estado`, { metodo: 'PATCH', cuerpo: { estado: 'CONFIRMADO' } })).status, 200);
+});
+
+// ------------------------------ Pedido a venta (SCRUM-62) ------------------------------
+
+const convertir = (id, cuerpo, tokenSesion, ruta = 'convert-to-sale') =>
+    api(`/${id}/${ruta}`, { metodo: 'POST', cuerpo, tokenSesion });
+
+async function entregar(id) {
+    for (const estado of ['CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO']) {
+        assert.equal((await cambiarEstado(id, { estado })).status, 200, estado);
+    }
+}
+
+caso('Convierte el pedido entregado en venta con sus líneas, sin mover stock', async () => {
+    const antes = await stock(ref.stock);
+    const movimientos = async () => (await pool.query('SELECT count(*)::int AS n FROM movimientos_inventario WHERE id_producto = $1', [ref.stock.id_producto])).rows[0].n;
+    const movsAntes = await movimientos();
+
+    const { status, body } = await convertir(ref.entregado, { metodo_pago: 'nequi', descuento: 1000 });
+    assert.equal(status, 201);
+    const v = body.venta;
+    assert.equal(v.id_pedido, ref.entregado);
+    assert.equal(v.id_cliente, ref.cliente);
+    assert.equal(v.metodo_pago, 'NEQUI');
+    assert.equal(v.nombre_usuario, 'Vendedor SIMO');
+    assert.equal(Number(v.subtotal), 5 * 3000);
+    assert.equal(Number(v.descuento), 1000);
+    assert.equal(Number(v.impuestos), 0);
+    assert.equal(Number(v.total), 14000);
+    assert.equal(v.estado, 'COMPLETADA');
+    assert.deepEqual(v.lineas.map((l) => [l.id_producto, Number(l.cantidad), Number(l.subtotal_linea)]), [[ref.stock.id_producto, 5, 15000]]);
+    assert.ok(v.lineas.every((l) => l.costo_unitario === undefined), 'no expone el costo');
+
+    assert.deepEqual(await stock(ref.stock), antes);
+    assert.equal(await movimientos(), movsAntes);
+    const pedido = (await api(`/${ref.entregado}`)).body.pedido;
+    assert.equal(pedido.id_venta, v.id_venta);
+    assert.ok((await api(`?id_cliente=${ref.cliente}&estado=ENTREGADO`)).body.data.some((p) => p.id_venta === v.id_venta));
+});
+
+caso('Conversión: 409 si ya se convirtió o no está entregado; 400/404 con datos inválidos', async () => {
+    assert.equal((await convertir(ref.entregado, { metodo_pago: 'EFECTIVO' })).status, 409);
+    const abierto = await pedidoDe(ref.kg, 1);
+    const r = await convertir(abierto, { metodo_pago: 'EFECTIVO' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /ENTREGADO/);
+    assert.equal((await convertir(99999999, { metodo_pago: 'EFECTIVO' })).status, 404);
+
+    const id = await pedidoDe(ref.disputado, 1);
+    await entregar(id);
+    for (const cuerpo of [{}, { metodo_pago: 'BITCOIN' }, { id_metodo_pago: 99999 }, { id_metodo_pago: 'x' },
+        { metodo_pago: 'EFECTIVO', descuento: -1 }, { metodo_pago: 'EFECTIVO', descuento: 'abc' },
+        { metodo_pago: 'EFECTIVO', descuento: 1.234 }, { metodo_pago: 'EFECTIVO', descuento: 1001 }]) {
+        assert.equal((await convertir(id, cuerpo)).status, 400, JSON.stringify(cuerpo));
+    }
+    assert.equal((await convertir('abc', { metodo_pago: 'EFECTIVO' })).status, 400);
+    ref.entregadoSinVenta = id;
+});
+
+caso('Dos conversiones simultáneas del mismo pedido: una sola venta', async () => {
+    const respuestas = await Promise.all([1, 2].map(() => convertir(ref.entregadoSinVenta, { metodo_pago: 'EFECTIVO' })));
+    assert.deepEqual(respuestas.map((r) => r.status).sort(), [201, 409]);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM ventas WHERE id_pedido = $1', [ref.entregadoSinVenta]);
+    assert.equal(rows[0].n, 1);
+});
+
+caso('Conversión: roles VENDEDOR, GERENTE y ADMIN; /convertir-venta es alias', async () => {
+    const id = await pedidoDe(ref.disputado, 1);
+    await entregar(id);
+    assert.equal((await convertir(id, { metodo_pago: 'EFECTIVO' }, null)).status, 401);
+    assert.equal((await convertir(id, { metodo_pago: 'EFECTIVO' }, await iniciarSesion(PORT, 'inventario@simo.local'))).status, 403);
+    const r = await convertir(id, { id_metodo_pago: 1 }, await iniciarSesion(PORT, 'gerente@simo.local'), 'convertir-venta');
+    assert.equal(r.status, 201);
+    assert.equal(r.body.venta.nombre_usuario, 'Gerente SIMO');
+});
+
+// ------------------------------ Cancelación de pedidos (SCRUM-100, CU-13) ------------------------------
+
+const cancelar = (id, cuerpo, tokenSesion, ruta = 'cancel') => api(`/${id}/${ruta}`, { metodo: 'POST', cuerpo, tokenSesion });
+
+caso('CA-1: cancelar en preparación devuelve 3 al Almacén y 2 a Bodega, con comprobante', async () => {
+    const id = await pedidoDe(ref.cancelar, 5);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    await cambiarEstado(id, { estado: 'EN_PREPARACION' });
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 5, almacen: 0 });
+
+    const { status, body } = await cancelar(id, { causa: 'El cliente ya no lo necesita' });
+    assert.equal(status, 200);
+    assert.equal(body.message, 'Pedido cancelado e inventario devuelto');
+    assert.equal(body.estado, 'CANCELADO');
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 7, almacen: 3 });
+    const c = body.comprobante;
+    assert.equal(c.causa, 'El cliente ya no lo necesita');
+    assert.equal(c.nombre_usuario, 'Vendedor SIMO');
+    assert.equal(c.estado_anterior, 'EN_PREPARACION');
+    assert.ok(c.fecha);
+    assert.deepEqual(c.reversion.map((r) => [r.ubicacion, Number(r.cantidad)]), [['ALMACEN', 3], ['BODEGA', 2]]);
+    assert.deepEqual([Number(c.reversion[1].saldo_bodega), Number(c.reversion[1].saldo_almacen)], [7, 3]);
+    assert.equal(body.pedido.historial.at(-1).motivo, 'El cliente ya no lo necesita');
+    ref.cancelado = id;
+});
+
+caso('EX-2: sin causa responde 400 con el mensaje del CU y no cambia nada', async () => {
+    const id = await pedidoDe(ref.cancelar, 1);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    for (const cuerpo of [{}, { causa: '   ' }, { causa: 5 }]) {
+        const r = await cancelar(id, cuerpo);
+        assert.equal(r.status, 400, JSON.stringify(cuerpo));
+        assert.equal(r.body.message, 'La causa de cancelación es obligatoria.');
+    }
+    assert.equal((await api(`/${id}`)).body.pedido.estado, 'CONFIRMADO');
+    // Sin stock descontado: se cancela sin reversión ("motivo" se acepta como sinónimo)
+    const r = await cancelar(id, { motivo: 'Pedido duplicado' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.message, 'Pedido cancelado');
+    assert.deepEqual(r.body.comprobante.reversion, []);
+});
+
+caso('EX-1 / CA-2: un pedido entregado no se cancela; uno cancelado tampoco otra vez', async () => {
+    const entregado = await cancelar(ref.entregado, { causa: 'tarde' });
+    assert.equal(entregado.status, 409);
+    assert.equal(entregado.body.message, 'No se puede cancelar un pedido ya entregado. Utilice el módulo de anulación si aplica.');
+    const otraVez = await cancelar(ref.cancelado, { causa: 'otra vez' });
+    assert.equal(otraVez.status, 409);
+    assert.match(otraVez.body.message, /ya está cancelado/);
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 7, almacen: 3 });   // no devolvió dos veces
+    assert.equal((await cancelar(99999999, { causa: 'x' })).status, 404);
+    assert.equal((await cancelar('abc', { causa: 'x' })).status, 400);
+});
+
+caso('Cancelar por PATCH /status también entrega el comprobante', async () => {
+    const id = await pedidoDe(ref.cancelar, 2);
+    await cambiarEstado(id, { estado: 'CONFIRMADO' });
+    await cambiarEstado(id, { estado: 'EN_PREPARACION' });
+    const r = await cambiarEstado(id, { estado: 'CANCELADO', motivo: 'Dirección errada' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.message, 'Pedido cancelado e inventario devuelto');
+    assert.deepEqual(r.body.comprobante.reversion.map((x) => [x.ubicacion, Number(x.cantidad)]), [['ALMACEN', 2]]);
+    assert.deepEqual(await stock(ref.cancelar), { bodega: 7, almacen: 3 });
+});
+
+caso('Cancelación: roles VENDEDOR, GERENTE y ADMIN; /cancelar es alias', async () => {
+    const id = await pedidoDe(ref.kg, 1);
+    assert.equal((await cancelar(id, { causa: 'x' }, null)).status, 401);
+    assert.equal((await cancelar(id, { causa: 'x' }, await iniciarSesion(PORT, 'inventario@simo.local'))).status, 403);
+    const r = await cancelar(id, { causa: 'Lo pidió el cliente' }, await iniciarSesion(PORT, 'gerente@simo.local'), 'cancelar');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.comprobante.nombre_usuario, 'Gerente SIMO');
 });
 
 // Una prueba contenedora con subpruebas: compatible con cualquier Node 18
-test('Ciclo secuencial y reserva de pedidos (HU-10)', async (t) => {
+// (before/after de node:test solo existen desde 18.8).
+test('Pedidos (SCRUM-81 / HU-10)', async (t) => {
     await preparar();
     try {
         for (const [nombre, fn] of casos) {

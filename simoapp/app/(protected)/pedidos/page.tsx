@@ -3,8 +3,9 @@
 // SCRUM-125 (Camilo) — Página de Gestión de Pedidos. Antes solo tenía el
 // título; ahora:
 //  - Tabla con la lista de pedidos (DataTable de components/ui), del más
-//    reciente al más antiguo. Por ahora con datos de prueba: ver
-//    lib/pedidos/pedidosService.ts para pasar a la API real.
+//    reciente al más antiguo. Los datos vienen de la API real (/api/orders);
+//    el mock de lib/pedidos/pedidosService.ts queda solo si se activa
+//    NEXT_PUBLIC_PEDIDOS_MOCK=true.
 //  - Filtro por rango de fechas Desde / Hasta arriba de la tabla
 //    (components/pedidos/FiltroFechasPedidos.tsx). La tabla se actualiza
 //    apenas se elige una fecha, sin botón "Buscar". Filtra por la fecha de
@@ -132,14 +133,15 @@ export default function PedidosPage() {
   const [pedidoAConvertir, setPedidoAConvertir] = useState<Pedido | null>(null);
 
   // Solo se lee cuando la lista ya llegó (en el navegador), porque el rol
-  // está en una cookie. Inventario recibiría un 403, que cierra la sesión.
+  // está en una cookie. Inventario consulta los pedidos, pero no los registra
+  // ni los convierte en venta: el backend le responde 403.
   const puedeRegistrar = lista.tipo === "lista" && leerRol() !== "INVENTARIO";
   // SCRUM-59 — Convertir en venta lo permiten los mismos roles (backend, SCRUM-62).
   const puedeConvertir = puedeRegistrar;
-  // HU-10 — Solo Vendedor, Gerente y Administrador mueven el ciclo de estados.
-  // Inventario consulta los pedidos (los necesita para alistar) pero no los
-  // avanza ni los cancela: el backend le responde 403.
-  const puedeGestionar = puedeRegistrar;
+  // HU-10 — Inventario SÍ mueve el ciclo: alistar el pedido es su trabajo y
+  // PATCH /api/orders/:id/status lo acepta (VENDEDOR, INVENTARIO, GERENTE,
+  // ADMIN). Ocultarle los botones lo dejaría sin cómo preparar el pedido.
+  const puedeGestionar = lista.tipo === "lista";
 
   const pedidosFiltrados =
     lista.tipo === "lista" ? filtrarPorFechas(lista.pedidos, rango) : [];
@@ -176,8 +178,9 @@ export default function PedidosPage() {
       });
 
       // HU-10 — Con la API real el stock lo mueve la base en la misma
-      // transacción (fn_salida_pedido / fn_reverso_pedido), así que solo hay
-      // que refrescar el catálogo. El mock vive en memoria y se ajusta aquí.
+      // transacción del cambio de estado (fn_cambiar_estado_pedido, migraciones
+      // 016 y 018), así que solo hay que refrescar el catálogo. El mock vive en
+      // memoria y se ajusta aquí.
       let mensajeExtra = "";
       if (PEDIDOS_USAN_MOCK) {
         const lineas = pedidoActual?.lineas ?? [];
