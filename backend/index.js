@@ -8,6 +8,7 @@ const pool = require('./db');
 const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
 const ventasRoutes = require('./routes/ventasRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const reportesRoutes = require('./routes/reportesRoutes');
 const errorHandler = require('./middleware/errorHandler');
 const iniciarAuditoriaPedidos = require('./cron/auditarPedidos');
 // DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
@@ -24,6 +25,7 @@ const { sanitizarXss } = require('./src/middleware/sanitizarXss'); // reemplaza 
 const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
 const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
 const pedidosRoutes = require('./src/routes/pedidos.routes'); // SCRUM-81 / HU-10
+
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -72,6 +74,7 @@ app.use('/api/users', usuariosRoutes);
 app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
 app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
 app.use('/api/orders', pedidosRoutes); // SCRUM-81 / HU-10
+app.use('/api/reports', reportesRoutes);
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
