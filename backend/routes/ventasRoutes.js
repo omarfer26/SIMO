@@ -144,9 +144,9 @@ router.get('/daily-summary', verificarToken, verificarRol(1, 2), async (req, res
 });
 
 // =====================================================================
-// PUT /api/sales/:id/cancel - Anular venta y revertir stock (SCRUM-97)
+// POST /api/sales/:id/annul - Anular venta y revertir stock 
 // =====================================================================
-router.put('/:id/cancel', verificarToken, verificarRol(1, 2), async (req, res, next) => {
+router.post('/:id/annul', verificarToken, verificarRol(1, 2), async (req, res, next) => {
     const id_venta = req.params.id;
     const client = await pool.connect();
 
