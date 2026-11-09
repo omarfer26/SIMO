@@ -2,11 +2,10 @@
 // pedidos. La página /pedidos llama a listarPedidos() sin saber si detrás
 // está la API real o el mock.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_PEDIDOS_MOCK=false
-// y reiniciar `npm run dev`. El backend ya expone /api/orders
-// (backend/src/routes/pedidos.routes.js, HU-10); mientras el interruptor no
-// sea "false" se sigue usando el mock para poder trabajar sin base de datos.
+// POR DEFECTO HABLA CON LA API REAL: /api/orders (backend/src/routes/
+// pedidos.routes.js, HU-10). Para trabajar sin base de datos, en
+// simoapp/.env.local poner NEXT_PUBLIC_PEDIDOS_MOCK=true y reiniciar
+// `npm run dev`; con el mock la lista y los cambios viven en el navegador.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (ver camilo-sanchez.md, SCRUM-125):
 //   GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD
@@ -67,9 +66,10 @@ import {
   type VentaDePedido,
 } from "./tipos";
 
-// HU-10 — La página necesita saber si el stock lo mueve el backend (reserva
-// en preparación) o si lo simula el mock en memoria.
-export const PEDIDOS_USAN_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK !== "false";
+// HU-10 — La página necesita saber si el stock lo mueve el backend (descuento
+// en preparación y devolución al cancelar) o si lo simula el mock en memoria.
+// El mock es opcional y hay que pedirlo: sin la variable, se usa la API real.
+export const PEDIDOS_USAN_MOCK = process.env.NEXT_PUBLIC_PEDIDOS_MOCK === "true";
 const USAR_MOCK = PEDIDOS_USAN_MOCK;
 
 interface FilaPedido {
