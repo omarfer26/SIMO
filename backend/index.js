@@ -10,6 +10,7 @@ const ventasRoutes = require('./routes/ventasRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const reportesRoutes = require('./routes/reportesRoutes');
 const errorHandler = require('./middleware/errorHandler');
+const auditInterceptor = require('./middleware/auditInterceptor');
 const iniciarAuditoriaPedidos = require('./cron/auditarPedidos');
 // DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
 // está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
@@ -40,6 +41,8 @@ app.use(helmet());
 // Middlewares base
 app.use(cors());
 app.use(express.json());
+
+app.use(auditInterceptor);
 
 // 2. Sanitización contra XSS (Cross-Site Scripting)
 app.use(sanitizarXss);
