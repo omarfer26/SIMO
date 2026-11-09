@@ -60,4 +60,36 @@ router.get('/metrics', verificarToken, verificarRol(1, 2), async (req, res, next
     }
 });
 
+// =====================================================================
+// GET /api/dashboard/alerts - Alertas de stock mínimo (SCRUM-68)
+// =====================================================================
+router.get('/alerts', verificarToken, verificarRol(1, 2), async (req, res, next) => {
+    try {
+        // Consulta en PostgreSQL para filtrado activo de productos por debajo del stock mínimo parametrizado
+        const query = `
+            SELECT 
+                id_producto, 
+                nombre, 
+                stock, 
+                stock_minimo 
+            FROM productos 
+            WHERE estado = true 
+            AND stock <= stock_minimo
+            ORDER BY stock ASC;
+        `;
+
+        const { rows } = await pool.query(query);
+
+        res.status(200).json({
+            status: "success",
+            mensaje: "Alertas de inventario recuperadas exitosamente",
+            total_alertas: rows.length,
+            productos_criticos: rows
+        });
+
+    } catch (error) {
+        next(error); // Delega la respuesta al manejador centralizado de errores
+    }
+});
+
 module.exports = router;
