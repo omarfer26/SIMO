@@ -26,6 +26,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { leerToken } from "@/lib/auth/sesion";
 import { productosMock } from "./productos.mock";
 import type { Categoria, Producto } from "./tipos";
 
@@ -57,6 +58,15 @@ const ProductosContext = createContext<ProductosContextValue | null>(null);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 
+// (Ramón, integración Sprint 3) — /api/products ahora exige sesión: antes
+// cualquiera podía crear productos y leer los precios de compra sin iniciar
+// sesión. Se envía el mismo token que usa apiClient. El backend le devuelve
+// precio_compra = null al Vendedor (costo confidencial).
+function cabecerasSesion(): Record<string, string> {
+  const token = leerToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 // Fila de producto tal como sale de la tabla `productos`
 // (backend/db/migrations/003_catalogo.sql). Los NUMERIC de PostgreSQL llegan
 // como texto ("89900.00"), por eso se aceptan texto o número. `categoria` y
@@ -69,7 +79,7 @@ interface ProductoApi {
   sku: string;
   nombre: string;
   descripcion: string | null;
-  precio_compra: string | number;
+  precio_compra: string | number | null;
   precio_venta: string | number;
   stock_total: string | number;
   // SCRUM-124 (Camilo) — Opcionales por si el backend no los manda.
@@ -126,7 +136,9 @@ function aProducto(fila: ProductoApi): Producto {
 async function pedirProductos(): Promise<Producto[]> {
   const filas: ProductoApi[] = [];
   for (let pagina = 1; ; pagina++) {
-    const res = await fetch(`${API_URL}/products?page=${pagina}&limit=100`);
+    const res = await fetch(`${API_URL}/products?page=${pagina}&limit=100`, {
+      headers: cabecerasSesion(),
+    });
     if (!res.ok) throw new Error(`GET /products respondió ${res.status}`);
     const cuerpo: { data: ProductoApi[]; meta?: { hasNextPage?: boolean } } =
       await res.json();
@@ -222,7 +234,7 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
 
       const res = await fetch(`${API_URL}/products`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...cabecerasSesion() },
         body: JSON.stringify(payload)
       });
 
