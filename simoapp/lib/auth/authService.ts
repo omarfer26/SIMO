@@ -89,6 +89,7 @@ export async function iniciarSesion(
         id: data.user.id,
         correo: data.user.email,
         rol: data.user.rol,
+        nombre: data.user.nombre_completo,
       },
     };
   } catch (error) {

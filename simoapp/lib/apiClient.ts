@@ -42,7 +42,11 @@ apiClient.interceptors.response.use(
     // "credenciales incorrectas" o "cuenta inactiva", y recargar la página
     // borraba el mensaje de error antes de que el usuario pudiera leerlo.
     const esLogin = error.config?.url?.includes('/auth/login');
-    if (!esLogin && error.response && (error.response.status === 401 || error.response.status === 403)) {
+    // (Camilo, 2026-11-10) — Lo mismo con la anulación de ventas: ahí un
+    // 401/403 es de las credenciales del Gerente que autoriza (contraseña
+    // mala o rol sin permiso), no de la sesión del Vendedor que la pide.
+    const esAnulacion = /\/sales\/\d+\/cancel$/.test(error.config?.url ?? '');
+    if (!esLogin && !esAnulacion && error.response && (error.response.status === 401 || error.response.status === 403)) {
       if (typeof window !== 'undefined') {
         // Limpiamos la sesión
         cerrarSesion();

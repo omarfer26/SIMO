@@ -2,11 +2,11 @@
 // del POS. El modal de confirmación llama a registrarVenta() sin saber si
 // detrás hay una API real o el mock.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_VENTAS_MOCK=false
-// y reiniciar `npm run dev`. Mientras esa variable no sea "false" se usa el
-// mock, porque el backend (rama back-end, revisado el 2026-10-15) todavía no
-// tiene ningún endpoint de ventas: solo las tablas en 005_ventas.sql.
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto:
+// el backend ya expone POST /api/sales (rama back-end, Sprint 3).
+// El mock solo se usa si en simoapp/.env.local se pone
+//   NEXT_PUBLIC_VENTAS_MOCK=true
+// (útil para trabajar sin backend), y hay que reiniciar `npm run dev`.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (ver camilo-sanchez.md, SCRUM-50):
 //   POST /api/sales
@@ -31,7 +31,7 @@ import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
 import type { DatosVenta, VentaRegistrada } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_VENTAS_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_VENTAS_MOCK === "true";
 
 type TipoErrorVenta = "stock" | "datos_invalidos" | "sin_conexion" | "servidor";
 

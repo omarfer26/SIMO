@@ -21,6 +21,7 @@ import { puedeGestionarCatalogo, puedeVerKardex } from "@/lib/auth/permisos";
 import { useRolSesion } from "@/lib/auth/useRolSesion";
 import { NOMBRE_UBICACION } from "@/lib/inventario/validaciones";
 import { Modal } from "@/components/ui/Modal";
+import AvisoCatalogoSinConexion from "@/components/catalogo/AvisoCatalogoSinConexion";
 
 const formatoCantidad = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
 
@@ -81,17 +82,8 @@ export default function CatalogoPage() {
 
       {/* SCRUM-catalogoBD (Camilo) — El catálogo viene del backend. Mientras
           llega se avisa que está cargando, y si el backend no responde se
-          muestran datos de prueba con este aviso, para que nadie los
-          confunda con el inventario real. */}
-      {origen === "respaldo" && (
-        <p
-          role="status"
-          className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
-        >
-          No se pudo conectar con el servidor: se muestran productos de
-          prueba, no el inventario real.
-        </p>
-      )}
+          avisa con opción de reintentar (ya no hay productos de prueba). */}
+      <AvisoCatalogoSinConexion queFalta="los productos" className="mt-6" />
 
       {/* SCRUM-124 (Camilo) — Aviso de traslado registrado.
           SCRUM-38 (Camilo) — También se usa para el ajuste registrado. */}
@@ -112,7 +104,8 @@ export default function CatalogoPage() {
           <p role="status" className="text-sm text-zinc-500 dark:text-zinc-400">
             Cargando catálogo...
           </p>
-        ) : (
+        ) : origen === "error" ? null : (
+          // (Camilo) — Con error de conexión solo se ve el aviso de arriba.
           // EP-02 — Sin la acción el componente no dibuja el botón.
           <BusquedaCatalogo
             productos={productos}

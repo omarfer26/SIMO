@@ -259,10 +259,16 @@ async function postAnularVenta(req, res) {
             motivo: motivo.trim(),
         });
         const venta = await obtenerVenta(resultado.id_venta);
+        // (Camilo) — Quién autorizó, para que el frontend lo muestre en el
+        // historial sin tener que iniciar sesión aparte con esas credenciales.
+        const autorizador = await buscarUsuarioActivo(idAutorizador);
         return res.status(200).json({
             status: 'success',
             message: `La venta #${resultado.id_venta} fue anulada y el stock fue restaurado.`,
             fecha: resultado.anulada_en,
+            autorizado_por: autorizador
+                ? { id: autorizador.id_usuario, nombre: autorizador.nombre_completo, rol: autorizador.rol }
+                : { id: idAutorizador, nombre: '', rol: '' },
             venta,
         });
     } catch (error) {

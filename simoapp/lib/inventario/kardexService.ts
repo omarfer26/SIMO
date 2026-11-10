@@ -2,11 +2,11 @@
 // un producto. La página /kardex llama a obtenerKardex() sin saber si detrás
 // hay una API real o el mock. Mismo molde que trasladosService.ts.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_KARDEX_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// ninguna rama del backend tiene todavía un endpoint del Kardex (revisado el
-// 2026-10-25: solo existe la función fn_kardex_producto, migración 012).
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto:
+// el backend ya expone GET /api/inventory/kardex/:id (rama back-end, Sprint 3).
+// El mock solo se usa si en simoapp/.env.local se pone
+//   NEXT_PUBLIC_KARDEX_MOCK=true
+// (útil para trabajar sin backend), y hay que reiniciar `npm run dev`.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (ver camilo-sanchez.md, SCRUM-39):
 //   GET /api/inventory/kardex/:id_producto   (roles INVENTARIO, ADMIN, GERENTE)
@@ -28,7 +28,7 @@ import apiClient from "@/lib/apiClient";
 import type { Producto } from "@/components/catalogo/tipos";
 import type { MovimientoKardex, TipoMovimiento } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_KARDEX_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_KARDEX_MOCK === "true";
 
 type TipoErrorKardex = "no_existe" | "sin_conexion" | "servidor";
 

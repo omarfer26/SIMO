@@ -3,11 +3,11 @@
 // El panel llama a listarAuditoria() sin saber si detrás está la API real o el
 // mock, igual que lib/reportes y lib/pedidos.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_AUDITORIA_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// todavía no hay endpoint de lectura de auditoría en el backend (la tabla
-// log_auditoria sí existe: backend/db/migrations/007_auditoria.sql).
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto:
+// el backend ya expone GET /api/audit (rama back-end, Sprint 3).
+// El mock solo se usa si en simoapp/.env.local se pone
+//   NEXT_PUBLIC_AUDITORIA_MOCK=true
+// (útil para trabajar sin backend), y hay que reiniciar `npm run dev`.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND:
 //   GET /api/audit?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&accion=AJUSTE_INVENTARIO
@@ -25,7 +25,7 @@ import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
 import type { AccionAuditoria, EntradaAuditoria, Snapshot } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_AUDITORIA_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_AUDITORIA_MOCK === "true";
 
 // --- Mock: bitácora de operaciones críticas --------------------------------
 
@@ -196,7 +196,8 @@ interface FilaAuditoria {
 
 function aEntrada(fila: FilaAuditoria): EntradaAuditoria {
   return {
-    idLog: fila.id_log,
+    // BIGSERIAL: PostgreSQL lo manda como texto ("12").
+    idLog: Number(fila.id_log),
     fecha: new Date(fila.fecha),
     usuario: fila.nombre_usuario,
     autorizador: fila.nombre_autorizador,

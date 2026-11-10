@@ -34,12 +34,16 @@ export function guardarSesion(sesion: SesionIniciada) {
   escribirCookie("token", sesion.token, DURACION_SEGUNDOS);
   escribirCookie("role", sesion.usuario.rol, DURACION_SEGUNDOS);
   escribirCookie("userId", String(sesion.usuario.id), DURACION_SEGUNDOS);
+  // (Camilo, 2026-11-10) — Nombre para el Navbar (antes era un usuario de
+  // prueba fijo). Si el login no lo trae, se muestra el correo.
+  escribirCookie("userName", sesion.usuario.nombre || sesion.usuario.correo, DURACION_SEGUNDOS);
 }
 
 export function cerrarSesion() {
   escribirCookie("token", "", 0);
   escribirCookie("role", "", 0);
   escribirCookie("userId", "", 0);
+  escribirCookie("userName", "", 0);
   // Restos de la versión anterior del login, que guardaba en localStorage.
   localStorage.removeItem("token");
   localStorage.removeItem("role");
@@ -57,6 +61,12 @@ export function leerToken(): string | null {
 export function leerIdUsuario(): number | null {
   const id = Number(leerCookie("userId"));
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// (Camilo, 2026-11-10) — Nombre del usuario con sesión abierta, o null si
+// no se sabe (sesión abierta antes de este cambio).
+export function leerNombreUsuario(): string | null {
+  return leerCookie("userName") || null;
 }
 
 // SCRUM-57 (Camilo) — Rol de la sesión abierta, o null si no hay. Solo sirve

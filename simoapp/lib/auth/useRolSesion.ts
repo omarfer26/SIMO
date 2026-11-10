@@ -12,7 +12,7 @@
 // rompería la hidratación.
 
 import { useSyncExternalStore } from "react";
-import { leerRol } from "./sesion";
+import { leerNombreUsuario, leerRol } from "./sesion";
 import type { CodigoRol } from "./tipos";
 
 // La cookie solo cambia al iniciar o cerrar sesión, y eso recarga la página
@@ -25,4 +25,10 @@ const SIN_ROL_EN_SERVIDOR = () => null;
 
 export function useRolSesion(): CodigoRol | null {
   return useSyncExternalStore(SIN_SUSCRIPCION, leerRol, SIN_ROL_EN_SERVIDOR);
+}
+
+// (Camilo, 2026-11-10) — Nombre del usuario de la sesión (cookie `userName`),
+// con la misma técnica que el rol: null hasta hidratar.
+export function useNombreSesion(): string | null {
+  return useSyncExternalStore(SIN_SUSCRIPCION, leerNombreUsuario, SIN_ROL_EN_SERVIDOR);
 }

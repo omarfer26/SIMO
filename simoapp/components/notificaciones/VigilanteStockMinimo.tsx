@@ -65,8 +65,9 @@ export default function VigilanteStockMinimo() {
 
     if (anteriores === null) return;
 
-    const opciones = { dePrueba: origen === "respaldo" };
-    for (const aviso of notificacionesDesdeCambios(cambios, opciones)) {
+    // (Camilo) — Ya no existe el catálogo de prueba: los avisos siempre
+    // salen del inventario del servidor.
+    for (const aviso of notificacionesDesdeCambios(cambios)) {
       notificar(aviso);
     }
 

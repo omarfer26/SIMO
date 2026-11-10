@@ -3,10 +3,11 @@
 // La página /reportes llama a listarReportes() y descargarReporte() sin saber
 // si detrás está la API real o el mock, igual que lib/pedidos/pedidosService.ts.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_REPORTES_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// todavía no hay endpoints de reportes en el backend (solo la maqueta del front).
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto:
+// el backend ya expone GET /api/reports (rama back-end, Sprint 3).
+// El mock solo se usa si en simoapp/.env.local se pone
+//   NEXT_PUBLIC_REPORTES_MOCK=true
+// (útil para trabajar sin backend), y hay que reiniciar `npm run dev`.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND:
 //   GET /api/reports?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&formato=EXCEL|PDF|WORD
@@ -31,7 +32,7 @@ import {
   type Reporte,
 } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_REPORTES_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_REPORTES_MOCK === "true";
 
 // --- Mock: catálogo de reportes ya generados -------------------------------
 

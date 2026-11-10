@@ -2,11 +2,11 @@
 // traslado Bodega → Almacén. El formulario llama a registrarTraslado() sin
 // saber si detrás hay una API real o el mock.
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_TRASLADOS_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// ninguna rama del backend tiene todavía un endpoint de traslados (revisado
-// el 2026-10-16: solo existe la regla en la tabla, migración 006).
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto:
+// el backend ya expone POST /api/inventory/transfers (rama back-end, Sprint 3).
+// El mock solo se usa si en simoapp/.env.local se pone
+//   NEXT_PUBLIC_TRASLADOS_MOCK=true
+// (útil para trabajar sin backend), y hay que reiniciar `npm run dev`.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (mismo estilo que el
 // POST /api/inventory/entries de Ramón, ver camilo-sanchez.md, SCRUM-124):
@@ -29,7 +29,7 @@ import apiClient from "@/lib/apiClient";
 import type { Producto } from "@/components/catalogo/tipos";
 import type { DatosTraslado, TrasladoRegistrado } from "./tipos";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_TRASLADOS_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_TRASLADOS_MOCK === "true";
 
 type TipoErrorTraslado = "stock" | "no_existe" | "datos_invalidos" | "sin_conexion" | "servidor";
 

@@ -13,10 +13,12 @@
 // abrir la app se le pide al backend (GET /api/products), que la lee de la
 // base de datos. Los nombres que llegan son los de la tabla `productos`
 // (sku, stock_total, stock_minimo_bodega...) y `aProducto` los convierte a
-// los que usa el frontend. Los datos de prueba solo se usan como respaldo
-// si el backend no responde, y en ese caso `origen` vale "respaldo" para
-// que la pantalla lo avise. Cuando el GET funcione de forma estable, se
-// puede borrar productos.mock.ts y ese respaldo.
+// los que usa el frontend.
+//
+// (Camilo, 2026-11-10) — Ya no hay respaldo con productos de prueba: si el
+// backend no responde, la lista queda vacía y `origen` vale "error" para
+// que cada pantalla avise que no se pudo traer el inventario real (y ofrezca
+// reintentar con refrescarProductos).
 
 import {
   createContext,
@@ -27,13 +29,12 @@ import {
   type ReactNode,
 } from "react";
 import { leerToken } from "@/lib/auth/sesion";
-import { productosMock } from "./productos.mock";
 import type { Categoria, Producto } from "./tipos";
 
 type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "stockBodega" | "stockAlmacen" | "estado">;
 
 // De dónde salió la lista que se está mostrando.
-export type OrigenProductos = "cargando" | "backend" | "respaldo";
+export type OrigenProductos = "cargando" | "backend" | "error";
 
 interface ProductosContextValue {
   productos: Producto[];
@@ -149,7 +150,7 @@ async function pedirProductos(): Promise<Producto[]> {
 }
 
 // La carga devuelve un resultado en lugar de lanzar, para que quien llama
-// decida qué hacer si falla (tirar del respaldo en la primera carga, o avisar
+// decida qué hacer si falla (marcar el error en la primera carga, o avisar
 // en una revalidación) sin repetir el try/catch en cada sitio.
 type ResultadoCarga = { ok: true; lista: Producto[] } | { ok: false; error: unknown };
 
@@ -177,8 +178,8 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
         return;
       }
       console.error("No se pudo cargar el catálogo desde el backend", resultado.error);
-      setProductos(productosMock);
-      setOrigen("respaldo");
+      setProductos([]);
+      setOrigen("error");
     });
     return () => {
       vigente = false;
@@ -326,8 +327,11 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  // (Camilo, 2026-11-10) — Al cerrar sesión se vacía la lista (antes volvía a
+  // los productos de prueba); el siguiente login la pide al backend.
   function limpiarProductos() {
-    setProductos(productosMock);
+    setProductos([]);
+    setOrigen("cargando");
   }
 
   return (

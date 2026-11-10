@@ -20,6 +20,8 @@ export interface SesionIniciada {
     id: number;
     correo: string;
     rol: CodigoRol;
+    /** (Camilo) — nombre_completo que devuelve el login; lo muestra el Navbar. */
+    nombre?: string;
   };
 }
 

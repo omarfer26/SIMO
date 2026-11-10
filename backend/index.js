@@ -25,6 +25,7 @@ const pagosRoutes = require('./src/routes/pagos.routes');           // SCRUM-78
 const dashboardRoutes = require('./src/routes/dashboard.routes');   // SCRUM-67/68
 const reportesRoutes = require('./src/routes/reportes.routes');     // SCRUM-76
 const auditoriaRoutes = require('./src/routes/auditoria.routes');   // HU-15 / SCRUM-77
+const empresaRoutes = require('./src/routes/empresa.routes');       // RF-04 (Camilo)
 
 // Reservas (routes/reservasRoutes.js y limpiarReservas.js) siguen desactivadas:
 // usan productos.stock y las tablas reservas_stock/detalles_reserva, que no
@@ -81,6 +82,7 @@ app.use('/api/payments', pagosRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportesRoutes);
 app.use('/api/audit', auditoriaRoutes);
+app.use('/api/company', empresaRoutes);
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES

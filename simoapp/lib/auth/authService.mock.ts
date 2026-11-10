@@ -87,7 +87,7 @@ export async function iniciarSesionMock(
 
   return {
     token: `mock.${btoa(`${usuario.id}:${usuario.rol}:${Date.now()}`)}`,
-    usuario: { id: usuario.id, correo: usuario.correo, rol: usuario.rol },
+    usuario: { id: usuario.id, correo: usuario.correo, rol: usuario.rol, nombre: usuario.nombreCompleto },
   };
 }
 

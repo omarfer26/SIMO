@@ -142,18 +142,12 @@ export default function BannerStockMinimo() {
                 )}
               </ul>
 
-              {/* Transparencia sobre la fuente: si el catálogo vino de los datos
-                  de prueba, el pendiente mostrado tampoco es real. */}
+              {/* Transparencia sobre la fuente: el pendiente sale siempre del
+                  inventario del servidor (ya no hay catálogo de prueba). */}
               <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-amber-800 dark:text-amber-300">
-                {origen === "respaldo" ? (
-                  <span className="rounded-full border border-amber-300 px-2 py-0.5 font-semibold dark:border-amber-800">
-                    Catálogo de prueba
-                  </span>
-                ) : (
-                  <span className="rounded-full border border-amber-300/70 px-2 py-0.5 font-medium dark:border-amber-800">
-                    Inventario del servidor
-                  </span>
-                )}
+                <span className="rounded-full border border-amber-300/70 px-2 py-0.5 font-medium dark:border-amber-800">
+                  Inventario del servidor
+                </span>
                 {ultimaSincronizacion && (
                   <span>Sincronizado {formatoHora.format(ultimaSincronizacion)}</span>
                 )}

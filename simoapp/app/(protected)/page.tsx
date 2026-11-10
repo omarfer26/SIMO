@@ -7,12 +7,12 @@
 // dibujan con Recharts y el resto del layout con TailwindCSS.
 //
 // DE DÓNDE SALEN LOS DATOS
-//  - Ventas: `listarVentas()`, el mismo historial que muestra /ventas (API
-//    real si NEXT_PUBLIC_VENTAS_MOCK=false; si no, el historial local de
-//    demostración). Por eso una venta recién registrada en el POS aparece
-//    acá al entrar o al tocar "Actualizar".
+//  - Ventas: `listarVentas()`, el mismo historial que muestra /ventas
+//    (GET /api/sales; el historial local de demostración solo con
+//    NEXT_PUBLIC_VENTAS_MOCK=true). Por eso una venta recién registrada en
+//    el POS aparece acá al entrar o al tocar "Actualizar".
 //  - Stock: `useProductos()`, que trae el catálogo del backend (GET
-//    /api/products) y cae en los productos de prueba si no responde.
+//    /api/products). Si no responde, se avisa y se puede reintentar.
 // Las cuentas no viven en la pantalla sino en lib/dashboard/metricas.ts.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -36,6 +36,7 @@ import { calcularDashboard, PERIODOS_DASHBOARD, TOP_ROTACION } from "@/lib/dashb
 import type { PeriodoDashboard } from "@/lib/dashboard/tipos";
 import { listarVentas } from "@/lib/ventas/anulacionService";
 import type { VentaHistorial } from "@/lib/ventas/tipos";
+import AvisoCatalogoSinConexion from "@/components/catalogo/AvisoCatalogoSinConexion";
 
 // Íconos (trazo, 24x24) de las tarjetas de indicadores.
 const ICONO_INGRESOS =
@@ -125,7 +126,7 @@ export default function DashboardPage() {
   const cargando = cargandoVentas || origen === "cargando";
   const opcionPeriodo = PERIODOS_DASHBOARD.find((opcion) => opcion.id === periodo);
   const rangoTexto = `${formatoFechaCorta.format(datos.rango.desde)} – ${formatoFechaCorta.format(datos.rango.hasta)}`;
-  const historialDeEjemplo = process.env.NEXT_PUBLIC_VENTAS_MOCK !== "false";
+  const historialDeEjemplo = process.env.NEXT_PUBLIC_VENTAS_MOCK === "true";
 
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
@@ -164,7 +165,7 @@ export default function DashboardPage() {
             {historialDeEjemplo && (
               <span
                 className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
-                title="NEXT_PUBLIC_VENTAS_MOCK no está en 'false': las ventas son datos de demostración."
+                title="NEXT_PUBLIC_VENTAS_MOCK está en 'true': las ventas son datos de demostración."
               >
                 Historial de demostración
               </span>
@@ -212,17 +213,8 @@ export default function DashboardPage() {
         </p>
       )}
 
-      {/* El catálogo vino de los datos de prueba: los indicadores de stock no
-          son el inventario real. */}
-      {origen === "respaldo" && (
-        <p
-          role="status"
-          className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
-        >
-          No se pudo conectar con el servidor: el stock y la rotación se calculan con productos
-          de prueba, no con el inventario real.
-        </p>
-      )}
+      {/* (Camilo) — Sin catálogo no hay stock ni rotación que calcular. */}
+      <AvisoCatalogoSinConexion queFalta="el stock y la rotación" className="mt-6" />
 
       {cargando ? (
         <div className="mt-6 space-y-6" aria-busy="true" aria-label="Cargando indicadores">

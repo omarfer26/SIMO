@@ -5,21 +5,46 @@
 // página). Es la "Vista" de los parámetros de la empresa: muestra los datos
 // actuales en modo lectura y, con el botón "Editar datos", abre el
 // formulario modal (FormularioEmpresa) para cambiarlos.
+//
+// (Camilo, 2026-11-10) — Los datos ya no son `empresaMock`: salen de la base
+// (GET /api/company, vía EmpresaContext) y "Guardar cambios" hace PUT
+// /api/company. Como el contexto es compartido, el Navbar y el ticket del
+// POS muestran el cambio al instante.
 
 import { useState } from "react";
 import FormularioEmpresa from "@/components/admin/FormularioEmpresa";
-import { empresaMock } from "@/components/shell/datos.mock";
+import { useEmpresa } from "@/components/shell/EmpresaContext";
+import Button from "@/components/ui/Button";
+import { Skeleton } from "@/components/ui/Skeleton";
 import type { Empresa } from "@/components/shell/tipos";
 
 export default function AdminPage() {
-  const [empresa, setEmpresa] = useState<Empresa>(empresaMock);
+  const { empresa, estado, guardarEmpresa: guardarEnServidor, recargarEmpresa } = useEmpresa();
   const [modalAbierto, setModalAbierto] = useState(false);
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
 
-  function guardarEmpresa(datos: Empresa) {
-    setEmpresa(datos);
+  async function guardarEmpresa(datos: Empresa) {
+    await guardarEnServidor(datos);
     setMostrarConfirmacion(true);
     setTimeout(() => setMostrarConfirmacion(false), 3000);
+  }
+
+  if (!empresa) {
+    return (
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-8">
+        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+          Datos de la empresa
+        </h1>
+        {estado === "error" ? (
+          <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            <span>No pudimos traer los datos de la empresa desde el servidor.</span>
+            <Button variant="secondary" onClick={recargarEmpresa}>Reintentar</Button>
+          </div>
+        ) : (
+          <Skeleton className="mt-6 h-48" />
+        )}
+      </main>
+    );
   }
 
   return (

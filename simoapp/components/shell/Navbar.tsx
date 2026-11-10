@@ -10,13 +10,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { NOMBRE_ROL, inicioDe } from "@/lib/auth/permisos";
 import { cerrarSesion } from "@/lib/auth/sesion";
-import { useRolSesion } from "@/lib/auth/useRolSesion";
+import { useNombreSesion, useRolSesion } from "@/lib/auth/useRolSesion";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 import { Modal } from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import CampanaNotificaciones from "@/components/notificaciones/CampanaNotificaciones";
-import { empresaMock, usuarioMock } from "./datos.mock";
+import { useEmpresa } from "./EmpresaContext";
 
 function iniciales(nombre: string) {
   return nombre
@@ -35,9 +35,13 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
   const [menuUsuarioAbierto, setMenuUsuarioAbierto] = useState(false);
   const [modalLogoutAbierto, setModalLogoutAbierto] = useState(false);
   const [cerrando, setCerrando] = useState(false);
-  // El rol de la sesión sale de la cookie (null hasta hidratar); el nombre
-  // sigue viniendo del mock hasta que el perfil sea real.
+  // El rol de la sesión sale de la cookie (null hasta hidratar).
+  // (Camilo, 2026-11-10) — El nombre también sale de la sesión (cookie
+  // userName) y la empresa del backend; ya no hay datos de prueba acá.
   const rol = useRolSesion();
+  const nombreUsuario = useNombreSesion() ?? "";
+  const { empresa } = useEmpresa();
+  const razonSocial = empresa?.razonSocial ?? "SIMO";
   const { limpiarProductos } = useProductos();
 
   // Acción visual de Logout con limpieza de Storage, Context y redirección a /login
@@ -79,10 +83,10 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
 
       <Link href={inicioDe(rol)} className="flex items-center gap-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600 text-sm font-bold text-white">
-          {empresaMock.razonSocial.charAt(0)}
+          {razonSocial.charAt(0)}
         </span>
         <span className="hidden text-sm font-semibold text-zinc-900 dark:text-zinc-100 sm:inline">
-          {empresaMock.razonSocial}
+          {razonSocial}
         </span>
       </Link>
 
@@ -100,14 +104,14 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
           className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-            {iniciales(usuarioMock.nombre)}
+            {iniciales(nombreUsuario)}
           </span>
           <span className="hidden text-left sm:block">
             <span className="block text-xs font-medium text-zinc-900 dark:text-zinc-100">
-              {usuarioMock.nombre}
+              {nombreUsuario}
             </span>
             <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">
-              {rol ? NOMBRE_ROL[rol] : usuarioMock.rol}
+              {rol ? NOMBRE_ROL[rol] : ""}
             </span>
           </span>
         </button>

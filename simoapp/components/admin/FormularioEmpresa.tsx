@@ -15,11 +15,14 @@ import type { Empresa } from "@/components/shell/tipos";
 import Button from "@/components/ui/Button";
 import InputText from "@/components/ui/InputText";
 import FileUpload from "./FileUpload";
+import { mensajeErrorEmpresa } from "@/lib/empresa/empresaService";
 
 interface FormularioEmpresaProps {
   empresa: Empresa;
   onCerrar: () => void;
-  onGuardar: (empresa: Empresa) => void;
+  /** (Camilo, 2026-11-10) — Ahora guarda en el backend: si falla, lanza y
+   *  el formulario muestra el error sin cerrarse. */
+  onGuardar: (empresa: Empresa) => Promise<void> | void;
 }
 
 type CamposTexto = "razonSocial" | "nit" | "telefono" | "direccion";
@@ -61,7 +64,10 @@ export default function FormularioEmpresa({
     });
   }
 
-  function manejarSubmit(e: React.FormEvent<HTMLFormElement>) {
+  const [enviando, setEnviando] = useState(false);
+  const [errorGuardar, setErrorGuardar] = useState("");
+
+  async function manejarSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     const nuevosErrores: Partial<Record<CamposTexto, string>> = {};
@@ -78,11 +84,19 @@ export default function FormularioEmpresa({
       return;
     }
 
-    onGuardar({
-      ...valores,
-      logoUrl: archivoLogo ? URL.createObjectURL(archivoLogo) : logoActual,
-    });
-    onCerrar();
+    setEnviando(true);
+    setErrorGuardar("");
+    try {
+      await onGuardar({
+        ...valores,
+        logoUrl: archivoLogo ? URL.createObjectURL(archivoLogo) : logoActual,
+      });
+      onCerrar();
+    } catch (error) {
+      setErrorGuardar(mensajeErrorEmpresa(error));
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
@@ -173,11 +187,19 @@ export default function FormularioEmpresa({
             onChange={(e) => actualizarCampo("direccion", e.target.value)}
           />
 
+          {errorGuardar && (
+            <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+              {errorGuardar}
+            </p>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={onCerrar}>
               Cancelar
             </Button>
-            <Button type="submit">Guardar cambios</Button>
+            <Button type="submit" disabled={enviando}>
+              {enviando ? "Guardando..." : "Guardar cambios"}
+            </Button>
           </div>
         </form>
       </div>

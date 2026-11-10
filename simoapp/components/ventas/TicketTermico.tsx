@@ -17,7 +17,7 @@ import type { Cliente } from "@/lib/clientes/tipos";
 import type { UsuarioListado } from "@/lib/auth/tipos";
 import type { CodigoMetodoPago, ItemCanasta, VentaRegistrada } from "@/lib/ventas/tipos";
 import { METODOS_PAGO } from "@/lib/ventas/tipos";
-import { empresaMock } from "@/components/shell/datos.mock";
+import { useEmpresa } from "@/components/shell/EmpresaContext";
 
 const formatoMoneda = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -61,6 +61,9 @@ export default function TicketTermico({
   onCerrar,
   imprimirAlMontar = false,
 }: TicketTermicoProps) {
+  // (Camilo, 2026-11-10) — Encabezado con los datos reales de la empresa
+  // (GET /api/company). Si no cargaron, se imprime solo "SIMO".
+  const { empresa } = useEmpresa();
   const {
     venta,
     items,
@@ -238,11 +241,11 @@ export default function TicketTermico({
         {/* Encabezado del Negocio */}
         <header className="text-center space-y-0.5">
           <h1 className="text-sm font-black uppercase tracking-wider">
-            {empresaMock.razonSocial}
+            {empresa?.razonSocial ?? "SIMO"}
           </h1>
-          <p className="text-[10px] font-semibold">NIT: {empresaMock.nit}</p>
-          <p className="text-[10px]">{empresaMock.direccion}</p>
-          <p className="text-[10px]">Tel: {empresaMock.telefono}</p>
+          {empresa?.nit && <p className="text-[10px] font-semibold">NIT: {empresa.nit}</p>}
+          {empresa?.direccion && <p className="text-[10px]">{empresa.direccion}</p>}
+          {empresa?.telefono && <p className="text-[10px]">Tel: {empresa.telefono}</p>}
           <div className="py-1">
             <span className="inline-block border-y border-dashed border-black px-2 py-0.5 text-[10px] uppercase font-bold tracking-widest">
               Tirilla de Venta POS

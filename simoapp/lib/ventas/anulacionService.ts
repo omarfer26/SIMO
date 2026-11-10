@@ -1,7 +1,12 @@
 // SCRUM-Anulacion — Puerta única para el historial de ventas y la anulación
 // con autorización gerencial.
-// Soporta tanto la API del backend como persistencia local (localStorage)
-// y datos semilla para pruebas inmediatas.
+//
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto: el
+// backend ya expone GET /api/sales y POST /api/sales/:id/cancel (rama
+// back-end, Sprint 3). El historial local (localStorage + datos semilla) solo
+// se usa si en simoapp/.env.local se pone NEXT_PUBLIC_VENTAS_MOCK=true.
+// Con la API real ya no hay respaldo silencioso: si el servidor falla, la
+// pantalla muestra el error en vez de ventas inventadas.
 
 import { isAxiosError } from "axios";
 import apiClient from "@/lib/apiClient";
@@ -18,7 +23,7 @@ import { resumirSoporte } from "./soportePago";
 // para no llenar este servicio de datos de prueba.
 import { ventasSemilla } from "./semillaVentas";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_VENTAS_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_VENTAS_MOCK === "true";
 const STORAGE_VENTAS_KEY = "simo.ventas.historial";
 // Marca de la versión de las semillas guardadas en el navegador. Cuando los
 // datos de ejemplo cambian (v2: historial de 90 días para el Dashboard
@@ -88,7 +93,7 @@ export function anexarVentaHistorial(
   nombreCliente?: string,
   docCliente?: string,
 ) {
-  const lista = leerHistorialLocal();
+  const lista = USAR_MOCK ? leerHistorialLocal() : [];
   const nuevaVenta: VentaHistorial = {
     idVenta: venta.idVenta,
     fecha: venta.fecha,
@@ -120,8 +125,9 @@ export function anexarVentaHistorial(
     })),
   };
 
-  const actualizada = [nuevaVenta, ...lista];
-  guardarHistorialLocal(actualizada);
+  // (Camilo) — Con la API real la venta ya quedó guardada en la base; esto
+  // solo arma la fila para mostrarla en pantalla sin volver a pedir la lista.
+  if (USAR_MOCK) guardarHistorialLocal([nuevaVenta, ...lista]);
   return nuevaVenta;
 }
 
@@ -134,13 +140,10 @@ export async function listarVentas(): Promise<VentaHistorial[]> {
     return leerHistorialLocal();
   }
 
-  try {
-    const { data } = await apiClient.get("/sales");
-    return data.ventas || data.data || [];
-  } catch {
-    // Si falla la API del backend, respaldo local
-    return leerHistorialLocal();
-  }
+  // (Camilo) — Sin respaldo local: si la API falla, el error llega a la
+  // pantalla (Dashboard y /ventas lo muestran) en vez de ventas de prueba.
+  const { data } = await apiClient.get("/sales");
+  return (data.data ?? []) as VentaHistorial[];
 }
 
 /**
@@ -158,7 +161,12 @@ export async function anularVenta(
     );
   }
 
-  // 1. Validar credenciales y perfil gerencial
+  // 3. API real (comportamiento por defecto). El backend valida las
+  // credenciales y el rol del autorizador (CU-11), así que no hace falta
+  // iniciar sesión aparte con ellas.
+  if (!USAR_MOCK) return anularVentaApi(datos, motivoLimpio);
+
+  // 1. Mock: validar credenciales y perfil gerencial
   let sesionAutorizador;
   try {
     sesionAutorizador = await iniciarSesion({
@@ -221,11 +229,19 @@ export async function anularVenta(
     };
   }
 
-  // 3. Si se conecta a la API Real del backend
+  throw new ErrorAnulacion("servidor", "Modo de anulación no reconocido.");
+}
+
+// (Camilo) — Anulación contra POST /api/sales/:id/cancel. El backend devuelve
+// quién autorizó (autorizado_por) para pintarlo en el historial.
+async function anularVentaApi(
+  datos: DatosAnulacionVenta,
+  motivoLimpio: string,
+): Promise<ResultadoAnulacion> {
   try {
     const { data } = await apiClient.post(`/sales/${datos.idVenta}/cancel`, {
       motivo: motivoLimpio,
-      auth_email: datos.credenciales.correo,
+      auth_email: datos.credenciales.correo.trim().toLowerCase(),
       auth_password: datos.credenciales.password,
     });
 
@@ -233,9 +249,9 @@ export async function anularVenta(
       idVenta: datos.idVenta,
       fechaAnulacion: data.fecha || new Date().toISOString(),
       autorizadoPor: {
-        id: sesionAutorizador.usuario.id,
-        nombre: sesionAutorizador.usuario.correo,
-        rol,
+        id: Number(data.autorizado_por?.id ?? 0),
+        nombre: data.autorizado_por?.nombre || datos.credenciales.correo,
+        rol: data.autorizado_por?.rol ?? "",
       },
       mensaje: data.message || `Venta #${datos.idVenta} anulada exitosamente.`,
     };

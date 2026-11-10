@@ -1,5 +1,6 @@
 import Shell from "@/components/shell/Shell";
 import { ProductosProvider } from "@/components/catalogo/ProductosContext";
+import { EmpresaProvider } from "@/components/shell/EmpresaContext";
 import { NotificacionesProvider } from "@/components/notificaciones/NotificacionesContext";
 import VigilanteStockMinimo from "@/components/notificaciones/VigilanteStockMinimo";
 import ContenedorNotificaciones from "@/components/notificaciones/ContenedorNotificaciones";
@@ -9,14 +10,18 @@ import ContenedorNotificaciones from "@/components/notificaciones/ContenedorNoti
 // detectar cuándo un producto cruza su stock mínimo. La pila de Toasts se monta
 // al final: se saca del árbol con createPortal, así que su posición acá no
 // afecta dónde aparece en pantalla.
+// (Camilo, 2026-11-10) — EmpresaProvider: los datos de la empresa (Navbar,
+// ticket y /admin) se piden una vez al backend y se comparten.
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ProductosProvider>
-      <NotificacionesProvider>
-        <VigilanteStockMinimo />
-        <Shell>{children}</Shell>
-        <ContenedorNotificaciones />
-      </NotificacionesProvider>
-    </ProductosProvider>
+    <EmpresaProvider>
+      <ProductosProvider>
+        <NotificacionesProvider>
+          <VigilanteStockMinimo />
+          <Shell>{children}</Shell>
+          <ContenedorNotificaciones />
+        </NotificacionesProvider>
+      </ProductosProvider>
+    </EmpresaProvider>
   );
 }

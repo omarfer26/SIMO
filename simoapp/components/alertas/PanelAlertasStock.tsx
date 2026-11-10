@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 import { Badge } from "@/components/ui/Badge";
 import { deficitUnidades, resumirAlertas } from "@/lib/inventario/alertasStock";
+import AvisoCatalogoSinConexion from "@/components/catalogo/AvisoCatalogoSinConexion";
 
 const formato = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
 
@@ -70,15 +71,7 @@ export default function PanelAlertasStock() {
         </Link>
       </div>
 
-      {origen === "respaldo" && (
-        <p
-          role="status"
-          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
-        >
-          No se pudo conectar con el servidor: estas alertas salen de los
-          productos de prueba, no del inventario real.
-        </p>
-      )}
+      <AvisoCatalogoSinConexion queFalta="las alertas de stock" />
 
       <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
         <table className="w-full min-w-[640px] text-left text-sm">

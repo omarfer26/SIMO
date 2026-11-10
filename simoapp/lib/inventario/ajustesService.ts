@@ -3,11 +3,11 @@
 // si detrás hay una API real o el mock. Sigue el mismo molde que
 // trasladosService.ts (SCRUM-124).
 //
-// CÓMO CAMBIAR DEL MOCK A LA API REAL: en simoapp/.env.local poner
-//   NEXT_PUBLIC_AJUSTES_MOCK=false
-// y reiniciar `npm run dev`. Mientras no sea "false" se usa el mock, porque
-// ninguna rama del backend tiene todavía un endpoint de ajustes (revisado
-// el 2026-10-25: solo existen las reglas en la base, migraciones 006 y 007).
+// (Camilo, 2026-11-10) — La API real es el comportamiento por defecto:
+// el backend ya expone POST /api/inventory/adjustments (rama back-end, Sprint 3).
+// El mock solo se usa si en simoapp/.env.local se pone
+//   NEXT_PUBLIC_AJUSTES_MOCK=true
+// (útil para trabajar sin backend), y hay que reiniciar `npm run dev`.
 //
 // CONTRATO QUE SE LE PROPONE AL BACKEND (mismo estilo que
 // POST /api/inventory/entries, ver camilo-sanchez.md, SCRUM-38):
@@ -32,7 +32,7 @@ import type { Producto } from "@/components/catalogo/tipos";
 import type { AjusteRegistrado, DatosAjuste } from "./tipos";
 import { NOMBRE_UBICACION } from "./validaciones";
 
-const USAR_MOCK = process.env.NEXT_PUBLIC_AJUSTES_MOCK !== "false";
+const USAR_MOCK = process.env.NEXT_PUBLIC_AJUSTES_MOCK === "true";
 
 type TipoErrorAjuste = "stock" | "no_existe" | "datos_invalidos" | "sin_conexion" | "servidor";
 
