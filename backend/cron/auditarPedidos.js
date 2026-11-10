@@ -1,46 +1,39 @@
 // backend/cron/auditarPedidos.js
+// SCRUM-69: tarea programada de medianoche que audita los pedidos vencidos y
+// emite la alerta consolidada.
+//
+// "Vencido" no es un estado del pedido: el ciclo (RN-04) solo tiene REGISTRADO,
+// CONFIRMADO, EN_PREPARACION, LISTO, ENTREGADO y CANCELADO, y la base rechaza
+// cualquier otro. Un pedido está vencido cuando sigue abierto y ya pasó su
+// fecha de entrega pactada, así que la tarea no modifica nada: consulta los
+// vencidos y deja el resumen en el registro del servidor. Las pantallas los
+// reciben en GET /api/dashboard/alerts (pedidos_vencidos) y en el campo
+// "vencido" de GET /api/orders.
 const cron = require('node-cron');
-const pool = require('../db');
+const { pedidosVencidos } = require('../src/repositories/pedidos.repository');
+
+async function auditarPedidosVencidos() {
+    const vencidos = await pedidosVencidos();
+    if (vencidos.length === 0) {
+        console.log('[Cron] Auditoría de pedidos: no hay pedidos vencidos.');
+        return vencidos;
+    }
+    const total = vencidos.reduce((suma, p) => suma + Number(p.total), 0);
+    console.warn(
+        `[Alerta consolidada] ${vencidos.length} pedido(s) vencido(s) por $${total.toFixed(2)}: `
+        + vencidos.map((p) => `#${p.id_pedido} (${p.estado}, ${p.dias_vencido} día(s), ${p.nombre_cliente})`).join('; ')
+    );
+    return vencidos;
+}
 
 const iniciarAuditoriaPedidos = () => {
-    // Se ejecuta todos los días a la medianoche (00:00)
-    cron.schedule('0 0 * * *', async () => {
-        console.log('[Cron] Iniciando auditoría de pedidos de medianoche...');
-        const client = await pool.connect();
-
-        try {
-            await client.query('BEGIN');
-
-            // Actualiza a 'vencido' los pedidos pendientes cuya fecha límite ya pasó
-            // y retorna los IDs para generar la alerta consolidada
-            const queryActualizar = `
-                UPDATE pedidos 
-                SET estado = 'vencido' 
-                WHERE estado = 'pendiente' 
-                AND fecha_vencimiento < CURRENT_DATE
-                RETURNING id_pedido, id_usuario;
-            `;
-
-            const { rows: pedidosVencidos } = await client.query(queryActualizar);
-
-            await client.query('COMMIT');
-
-            // Disparar alertas consolidadas si se encontraron vencimientos
-            if (pedidosVencidos.length > 0) {
-                console.log(`[Alerta Consolidada] Se auditaron y marcaron ${pedidosVencidos.length} pedidos como vencidos.`);
-                // Aquí podrías integrar un envío de correo (Nodemailer) a los administradores
-                // o insertar un registro en una tabla de 'notificaciones'.
-            } else {
-                console.log('[Cron] Auditoría finalizada: No se encontraron pedidos vencidos de ayer.');
-            }
-
-        } catch (error) {
-            await client.query('ROLLBACK');
+    // Todos los días a la medianoche, hora de Colombia
+    cron.schedule('0 0 * * *', () => {
+        auditarPedidosVencidos().catch((error) => {
             console.error('[Cron Error] Falla al auditar los pedidos a medianoche:', error);
-        } finally {
-            client.release();
-        }
-    });
+        });
+    }, { timezone: 'America/Bogota' });
 };
 
 module.exports = iniciarAuditoriaPedidos;
+module.exports.auditarPedidosVencidos = auditarPedidosVencidos;

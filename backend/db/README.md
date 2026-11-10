@@ -23,7 +23,12 @@ db/
 │   ├── 015_pedidos.sql         total y reglas de las líneas de pedido (SCRUM-81)
 │   ├── 016_estados_pedido.sql  fn_cambiar_estado_pedido: stock al preparar y al cancelar (SCRUM-61)
 │   ├── 017_pedido_a_venta.sql  fn_convertir_pedido_en_venta, sin mover stock (SCRUM-62)
-│   └── 018_cancelacion_pedidos.sql cancelación según CU-13: mensajes y saldo reversado en auditoría (SCRUM-100)
+│   ├── 018_cancelacion_pedidos.sql cancelación según CU-13: mensajes y saldo reversado en auditoría (SCRUM-100)
+│   ├── 019_limpiar_funciones_pedido_antiguas.sql elimina fn_salida_pedido y fn_reverso_pedido (sin uso)
+│   ├── 020_ventas_pos.sql      fn_registrar_venta, fn_anular_venta y referencia de pago (HU-07, CU-11)
+│   ├── 021_traslados.sql       fn_registrar_traslado Bodega -> Almacén (HU-06)
+│   ├── 022_pagos_digitales.sql pagos_digitales y fn_conciliar_pago (SCRUM-78)
+│   └── 023_auditoria_precios.sql trigger CAMBIO_PRECIO en log_auditoria (SCRUM-77)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
@@ -38,7 +43,8 @@ db/
     ├── 006_pedidos.sql           12 pruebas de las líneas y el total de los pedidos (no deja datos)
     ├── 007_estados_pedido.sql    17 pruebas del ciclo de estados con descuento y reverso de stock (no deja datos)
     ├── 008_pedido_a_venta.sql    13 pruebas de la conversión de pedido entregado en venta (no deja datos)
-    └── 009_cancelacion_pedidos.sql 11 pruebas de la cancelación según CU-13 (no deja datos)
+    ├── 009_cancelacion_pedidos.sql 11 pruebas de la cancelación según CU-13 (no deja datos)
+    └── 010_ventas_traslados_pagos.sql 47 pruebas de venta, anulación, traslados, pagos y precios (no deja datos)
 ```
 
 ## Cómo crear la base

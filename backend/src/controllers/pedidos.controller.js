@@ -265,7 +265,7 @@ async function patchEstadoPedido(req, res) {
 
 // =====================================================================
 // POST /api/orders/:id/convert-to-sale (SCRUM-62, HU-12)
-// Body: { metodo_pago: "EFECTIVO" | "NEQUI" | ... (o id_metodo_pago), descuento? }
+// Body: { metodo_pago: "EFECTIVO" | "NEQUI" | ... (o id_metodo_pago), descuento?, referencia_pago? }
 // Convierte un pedido ENTREGADO en venta con sus mismas líneas. No mueve
 // stock: ya se descontó al preparar el pedido. Precios con IVA incluido
 // (impuestos 0), igual que el POS.
@@ -279,7 +279,11 @@ async function postConvertirEnVenta(req, res) {
         if (!REGEX_ENTERO_POSITIVO.test(req.params.id)) {
             return badRequest(res, 'El id del pedido debe ser un entero positivo.');
         }
-        const { metodo_pago, id_metodo_pago, descuento } = req.body || {};
+        const { metodo_pago, id_metodo_pago, descuento, referencia_pago } = req.body || {};
+        if (referencia_pago !== undefined && referencia_pago !== null
+            && (typeof referencia_pago !== 'string' || referencia_pago.trim().length > 40)) {
+            return badRequest(res, 'La referencia_pago debe ser un texto de máximo 40 caracteres.');
+        }
         let metodo = null;
         if (typeof metodo_pago === 'string' && metodo_pago.trim()) {
             metodo = await buscarMetodoPago({ codigo: metodo_pago.trim().toUpperCase() });
@@ -305,6 +309,8 @@ async function postConvertirEnVenta(req, res) {
             idUsuario: Number(idUsuario),
             idMetodoPago: metodo.id_metodo_pago,
             descuento: descuentoNumero,
+            // SCRUM-73: código del comprobante de Nequi, Daviplata o transferencia
+            referenciaPago: typeof referencia_pago === 'string' ? referencia_pago.trim() : null,
         });
         const venta = await obtenerVentaDePedido(idVenta);
         return res.status(201).json({ message: `Pedido ${req.params.id} convertido en la venta ${idVenta}`, venta });

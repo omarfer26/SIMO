@@ -107,7 +107,9 @@ caso('Cada rol solo accede a lo suyo (RBAC)', async () => {
     const vendedor = await iniciarSesion(PORT, 'vendedor@simo.local');
     const inventario = await iniciarSesion(PORT, 'inventario@simo.local');
     const gerente = await iniciarSesion(PORT, 'gerente@simo.local');
-    assert.equal((await peticion('/users', { token: vendedor })).status, 403);
+    // El listado es de todos los roles (POS y traslados lo usan); el detalle y la gestión no
+    assert.equal((await peticion('/users', { token: vendedor })).status, 200);
+    assert.equal((await peticion('/users/1', { token: vendedor })).status, 403);
     assert.equal((await peticion('/users', { token: gerente })).status, 200);
     assert.equal((await peticion('/users', { metodo: 'POST', cuerpo: {}, token: gerente })).status, 403);
     assert.equal((await peticion('/customers', { token: vendedor })).status, 200);

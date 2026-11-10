@@ -7,7 +7,10 @@ const { verificarToken, verificarRol } = require('../../middleware/authMiddlewar
 const router = express.Router();
 
 router.post('/', verificarToken, verificarRol('ADMIN'), postUsuario);
-router.get('/', verificarToken, verificarRol('ADMIN', 'GERENTE'), getUsuarios);
+// El listado lo consultan todos los roles: el POS (Vendedor) lo usa para elegir
+// el vendedor en turno y el formulario de traslados (Inventario) para elegir al
+// responsable. Con 403 el frontend cierra la sesión. No expone contraseñas.
+router.get('/', verificarToken, verificarRol('ADMIN', 'GERENTE', 'INVENTARIO', 'VENDEDOR'), getUsuarios);
 router.get('/:id', verificarToken, verificarRol('ADMIN', 'GERENTE'), getUsuarioPorId);
 router.put('/:id', verificarToken, verificarRol('ADMIN'), putUsuario);
 // SCRUM-25: /status (Jira) y /estado (ruta que usa el frontend en SCRUM-21)

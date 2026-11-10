@@ -143,10 +143,10 @@ async function obtenerComprobanteCancelacion(idPedido) {
 }
 
 // SCRUM-62: pedido ENTREGADO -> venta, sin mover stock (fn_convertir_pedido_en_venta, 017)
-async function convertirEnVenta({ idPedido, idUsuario, idMetodoPago, descuento }) {
+async function convertirEnVenta({ idPedido, idUsuario, idMetodoPago, descuento, referenciaPago }) {
     const { rows } = await pool.query(
-        'SELECT id_venta FROM fn_convertir_pedido_en_venta($1, $2, $3, $4)',
-        [idPedido, idUsuario, idMetodoPago, descuento]
+        'SELECT id_venta FROM fn_convertir_pedido_en_venta($1, $2, $3, $4, $5)',
+        [idPedido, idUsuario, idMetodoPago, descuento, referenciaPago ?? null]
     );
     return rows[0].id_venta;
 }
@@ -165,7 +165,8 @@ async function obtenerVentaDePedido(idVenta) {
     const { rows } = await pool.query(
         `SELECT v.id_venta, v.id_pedido, v.id_cliente, c.nombre AS nombre_cliente, v.id_usuario,
                 u.nombre_completo AS nombre_usuario, v.fecha_venta, mp.codigo AS metodo_pago,
-                mp.nombre AS nombre_metodo_pago, v.subtotal, v.descuento, v.impuestos, v.total, v.estado
+                mp.nombre AS nombre_metodo_pago, v.referencia_pago,
+                v.subtotal, v.descuento, v.impuestos, v.total, v.estado
          FROM ventas v
          JOIN usuarios u ON u.id_usuario = v.id_usuario
          JOIN metodos_pago mp ON mp.id_metodo_pago = v.id_metodo_pago
@@ -183,6 +184,21 @@ async function obtenerVentaDePedido(idVenta) {
     return { ...rows[0], lineas: lineas.rows };
 }
 
+// SCRUM-69: pedidos abiertos cuya fecha pactada ya pasó. "Vencido" no es un
+// estado guardado (el ciclo RN-04 no lo tiene): se calcula con la fecha.
+async function pedidosVencidos() {
+    const { rows } = await pool.query(
+        `SELECT p.id_pedido, c.nombre AS nombre_cliente, c.telefono AS telefono_cliente, p.estado,
+                p.fecha_entrega_pactada, p.total,
+                floor(extract(epoch FROM now() - p.fecha_entrega_pactada) / 86400)::int AS dias_vencido
+         FROM pedidos p
+         JOIN clientes c ON c.id_cliente = p.id_cliente
+         WHERE ${VENCIDO}
+         ORDER BY p.fecha_entrega_pactada`
+    );
+    return rows;
+}
+
 async function estadoCliente(idCliente) {
     const { rows } = await pool.query('SELECT estado FROM clientes WHERE id_cliente = $1', [idCliente]);
     return rows[0] ? rows[0].estado : null;
@@ -197,5 +213,6 @@ module.exports = {
     convertirEnVenta,
     buscarMetodoPago,
     obtenerVentaDePedido,
+    pedidosVencidos,
     estadoCliente,
 };

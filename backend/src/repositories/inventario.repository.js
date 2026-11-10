@@ -118,10 +118,12 @@ async function obtenerKardex(idProducto, desde, hasta) {
                 k.costo_unitario, k.costo_promedio, k.saldo_valorizado, k.saldo_coincide,
                 k.documento_referencia, k.motivo,
                 k.id_usuario, u.nombre_completo AS nombre_usuario,
-                m.id_venta, m.id_pedido, m.id_compra
+                m.id_venta, m.id_pedido, m.id_compra,
+                m.id_responsable, r.nombre_completo AS nombre_responsable
          FROM fn_kardex_producto($1, $2, $3) k
          JOIN movimientos_inventario m ON m.id_movimiento = k.id_movimiento
          LEFT JOIN usuarios u ON u.id_usuario = k.id_usuario
+         LEFT JOIN usuarios r ON r.id_usuario = m.id_responsable
          ORDER BY k.fecha_movimiento, k.id_movimiento`,
         [idProducto, desde, hasta]
     );
@@ -142,8 +144,20 @@ async function resumenProductoKardex(idProducto) {
     return rows[0] || null;
 }
 
+// HU-06: traslado Bodega -> Almacén (fn_registrar_traslado, migración 021)
+async function registrarTraslado({ idProducto, cantidad, idUsuario, idResponsable, motivo }) {
+    const { rows } = await pool.query(
+        `SELECT m.id_movimiento, m.fecha_movimiento, m.tipo_movimiento, m.cantidad,
+                m.saldo_bodega, m.saldo_almacen, m.id_producto, m.id_usuario, m.id_responsable, m.motivo
+         FROM fn_registrar_traslado($1, $2, $3, $4, $5) m`,
+        [idProducto, cantidad, idUsuario, idResponsable, motivo]
+    );
+    return rows[0];
+}
+
 module.exports = {
     buscarProductoPorSku,
+    registrarTraslado,
     obtenerKardex,
     resumenProductoKardex,
     registrarAjuste,

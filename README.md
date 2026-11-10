@@ -122,7 +122,7 @@ Una vez levantados los contenedores, puedes probar el endpoint de creación de p
 
 - **Método**: POST
 - **URL**: `http://localhost:3000/api/products`
-- **Headers**: `Content-Type: application/json`
+- **Headers**: `Content-Type: application/json` y `Authorization: Bearer <token>` (rol `INVENTARIO` o `ADMIN`; el token se obtiene en `POST /api/auth/login`)
 - **Body**:
 
 ```json
@@ -137,6 +137,9 @@ Una vez levantados los contenedores, puedes probar el endpoint de creación de p
   "stock_minimo_bodega": 10,
   "stock_minimo_almacen": 5
 }
+```
+
+> **Catálogo protegido.** `GET /api/products` exige sesión (cualquier rol) y devuelve también `stock_bodega`, `stock_almacen`, `categoria` y `unidad`; al Vendedor le llega `precio_compra: null` (costo confidencial). `POST` y `PUT /api/products/:id` son de `INVENTARIO` y `ADMIN`. Cambiar un precio deja el registro `CAMBIO_PRECIO` en la auditoría (migración 023).
 
 ## 👤 Endpoints de Usuarios (SCRUM-22, SCRUM-23)
 
@@ -145,7 +148,7 @@ Una vez levantados los contenedores, puedes probar el endpoint de creación de p
 | Método | Ruta | Descripción |
 | :--- | :--- | :--- |
 | POST | `/api/users` | Crea un usuario. Body: `id_rol`, `nombre_completo`, `correo`, `usuario`, `password` (mín. 8) |
-| GET | `/api/users` | Lista paginada. Query opcional: `page`, `limit` (1-100, por defecto 10), `estado` (`true`/`false`), `id_rol`, `rol` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`), `q` (busca en nombre, correo o usuario) |
+| GET | `/api/users` | Lista paginada (todos los roles: el POS y el formulario de traslados la usan). Query opcional: `page`, `limit` (1-100, por defecto 10), `estado` (`true`/`false`), `id_rol`, `rol` (`ADMIN`, `GERENTE`, `INVENTARIO`, `VENDEDOR`), `q` (busca en nombre, correo o usuario) |
 | GET | `/api/users/:id` | Detalle de un usuario |
 | PUT | `/api/users/:id` | Edita `id_rol`, `nombre_completo`, `correo` y/o `usuario` (al menos uno). No cambia la contraseña ni el estado. No permite quitar el rol al último administrador activo (`409`) |
 | PATCH | `/api/users/:id/status` (alias `/estado`) | Activa o inactiva: `{ "estado": true \| false }`. Inactivar corta de inmediato las sesiones abiertas e impide el login. No permite inactivar al último administrador activo (`409`) |
@@ -348,6 +351,54 @@ Consulta:
 - Errores: `400` datos inválidos, `404` cliente inexistente, `409` documento duplicado.
 
 ---
+
+### 🔁 Traslados Bodega → Almacén (HU-06 / SCRUM-95)
+
+> Roles `INVENTARIO` / `ADMIN`. Contrato del formulario del frontend (SCRUM-124).
+
+`POST /api/inventory/transfers` con `{ "id_producto": 1, "cantidad": 3, "id_responsable": 2, "motivo": "Surtir vitrina" }`. Resta de Bodega, suma al Almacén y registra `TRASLADO_INTERNO` en el Kardex (función `fn_registrar_traslado`, migración 021). Responde `201` con `{ message, traslado: { id_movimiento, fecha_movimiento, cantidad, saldo_bodega, saldo_almacen, id_responsable, ... } }`. Errores: `400` dato inválido, `404` producto inexistente, `409` stock insuficiente en Bodega o producto inactivo.
+
+### 🛒 Ventas POS y anulación (HU-07, CU-11 / SCRUM-53, SCRUM-54, SCRUM-96)
+
+`POST /api/sales` (roles `VENDEDOR`, `ADMIN`), contrato del POS:
+
+```json
+{ "metodo_pago": "NEQUI", "id_cliente": null, "descuento": 0, "referencia_pago": "M1234567",
+  "detalles": [ { "id_producto": 1, "cantidad": 2 } ] }
+```
+
+- La venta completa ocurre en `fn_registrar_venta` (migración 020): valida contra el stock total (RN-01), descuenta primero del Almacén y luego de Bodega (RN-02) y deja el Kardex, todo o nada.
+- **Los precios y totales los calcula el servidor**: `precio_unitario`, `subtotal` y `total` que mande el navegador se ignoran. Precios con IVA incluido (`impuestos = 0`).
+- `id_vendedor` opcional: vendedor en turno de una caja compartida.
+- Responde `201` con `{ message, venta: { id_venta, fecha_venta, total, detalles: [...] } }`. Errores: `400` dato inválido, `404` producto inexistente, `409` stock insuficiente.
+
+Consulta: `GET /api/sales?desde=&hasta=&estado=` (roles `VENDEDOR`, `GERENTE`, `ADMIN`; últimos 180 días por defecto) devuelve `{ data: [...] }` en el formato `VentaHistorial` del frontend; `GET /api/sales/:id`; `GET /api/sales/daily-summary?fecha=` (arqueo de caja por método de pago).
+
+Anulación: `POST /api/sales/:id/cancel` (alias `/annul`) con `{ "motivo": "...", "auth_email": "gerente@...", "auth_password": "..." }`. La autoriza un Gerente o Administrador con sus credenciales (o su propia sesión). Devuelve cada cantidad a su ubicación de origen y deja `ANULACION_VENTA` en la auditoría. Errores: `400` sin motivo, `401` credenciales del autorizador incorrectas, `403` el autorizador no es Gerente/Administrador, `404` venta inexistente, `409` ya anulada.
+
+### 💳 Pagos por billetera virtual y conciliación (SCRUM-78)
+
+Cada venta con `NEQUI`, `DAVIPLATA` o `TRANSFERENCIA` (del POS o de un pedido convertido) crea un pago `PENDIENTE` con su `referencia_pago` (migración 022). No hay integración bancaria: se guarda el soporte y el resultado de la revisión manual.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/payments/wallet?estado=&metodo=&desde=&hasta=&referencia=` | Pagos digitales con su estado y un `resumen` (pendientes, conciliados, rechazados y montos). `GERENTE`, `ADMIN` |
+| POST | `/api/payments/wallet-conciliation` | `{ "id_venta": 10, "estado": "CONCILIADO" \| "RECHAZADO" \| "PENDIENTE", "observacion": "...", "referencia": "..." }`. Rechazar exige observación; una venta anulada no se concilia (`409`). `GERENTE`, `ADMIN` |
+| PUT | `/api/payments/wallet/:id_venta/receipt?nombre=archivo.pdf` | Sube el comprobante: el cuerpo es el archivo (JPG, PNG, WEBP o PDF, máx. 5 MB) con su `Content-Type`. Alias: `POST /api/sales/:id/comprobante`. `VENDEDOR`, `GERENTE`, `ADMIN` |
+| GET | `/api/payments/wallet/:id_venta/receipt` | Descarga el comprobante. `GERENTE`, `ADMIN` |
+
+### 📊 Dashboard, alertas, reportes y auditoría (SCRUM-67, 68, 69, 76, 77 / HU-13, HU-14, HU-15)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/dashboard/metrics` | Ventas del mes y del día, valor del inventario, 5 productos más vendidos, pedidos abiertos y vencidos, pagos por conciliar. `ADMIN`, `GERENTE` |
+| GET | `/api/dashboard/alerts` | Alertas duales: `SURTIR` (Almacén en su mínimo y hay en Bodega) y `COMPRAR` (Bodega en su mínimo). Gerente y Administrador reciben además `pedidos_vencidos`. `ADMIN`, `GERENTE`, `INVENTARIO` |
+| GET | `/api/reports` | Catálogo de reportes `{ data: [ { id_reporte, nombre, descripcion, categoria, formato, periodo, fecha_generacion, tamano_bytes, nombre_archivo } ] }`. `ADMIN`, `GERENTE` |
+| GET | `/api/reports/:id/download` | Descarga el Excel o PDF, generado con los datos del momento y los datos de la empresa en el encabezado |
+| GET | `/api/audit?desde=&hasta=&accion=` | Log de auditoría `{ data: [ { id_log, fecha, nombre_usuario, nombre_autorizador, accion, entidad, id_entidad, justificacion, datos_anteriores, datos_nuevos, direccion_ip } ] }`. Solo lectura. `ADMIN`, `GERENTE` |
+
+- El log lo escriben las funciones de la base en la misma transacción de la operación: `AJUSTE_INVENTARIO`, `CANCELACION_PEDIDO`, `ANULACION_VENTA` y `CAMBIO_PRECIO`.
+- Tarea de medianoche (`cron/auditarPedidos.js`, SCRUM-69): consolida los pedidos vencidos. "Vencido" no es un estado: se calcula con la fecha pactada.
 
 ## 🚀 Despliegue
 

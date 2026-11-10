@@ -5,30 +5,37 @@ const jwt = require('jsonwebtoken');
 const { randomUUID } = require('node:crypto');
 const JWT = require('./src/config/jwt'); // clave y expiración compartidas con el middleware
 const pool = require('./db');
-const usuariosRoutes = require('./src/routes/usuarios.routes'); // SCRUM-22/23/24 (contrato que usa el frontend)
-const ventasRoutes = require('./routes/ventasRoutes');
-const dashboardRoutes = require('./routes/dashboardRoutes');
-const reportesRoutes = require('./routes/reportesRoutes');
 const errorHandler = require('./middleware/errorHandler');
-const auditInterceptor = require('./middleware/auditInterceptor');
-const iniciarAuditoriaPedidos = require('./cron/auditarPedidos');
-// DESACTIVADO (Camilo, 2026-10-20): la API no arrancaba. Reservas todavía no
-// está terminada: routes/reservasRoutes.js está vacío, el cron quedó en
-// backend/limpiarReservas.js (no en cron/) y usa tablas (reservas_stock,
-// detalles_reserva) y la columna productos.stock que no existen en el esquema.
-// Volver a activar estas líneas cuando la función de reservas esté lista.
-// const reservasRoutes = require('./routes/reservasRoutes');
-// const iniciarLimpiezaDeReservas = require('./cron/limpiarReservas');
+const iniciarAuditoriaPedidos = require('./cron/auditarPedidos'); // SCRUM-69
 
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
-const { sanitizarXss } = require('./src/middleware/sanitizarXss'); // reemplaza xss-clean (incompatible con Express 5)
-const inventarioRoutes = require('./src/routes/inventario.routes'); // SCRUM-94 / HU-05
-const clientesRoutes = require('./src/routes/clientes.routes'); // SCRUM-98 / HU-09
-const pedidosRoutes = require('./src/routes/pedidos.routes'); // HU-10
+// Reemplaza xss-clean (incompatible con Express 5). Se usa la versión de
+// middleware/: escapa solo < y >. La de src/middleware escapaba también / ' " &,
+// lo que alteraba contraseñas, direcciones y URLs antes de guardarlas.
+const { sanitizarXss } = require('./middleware/sanitizarXss');
 
+const usuariosRoutes = require('./src/routes/usuarios.routes');     // SCRUM-22/23/24/25
+const productosRoutes = require('./src/routes/productos.routes');   // SCRUM-33/34/35 / HU-04
+const inventarioRoutes = require('./src/routes/inventario.routes'); // HU-05, HU-06, SCRUM-42/43/45
+const clientesRoutes = require('./src/routes/clientes.routes');     // SCRUM-98 / HU-09
+const pedidosRoutes = require('./src/routes/pedidos.routes');       // HU-10, HU-11, HU-12
+const ventasRoutes = require('./src/routes/ventas.routes');         // HU-07, CU-11 (SCRUM-53/54)
+const pagosRoutes = require('./src/routes/pagos.routes');           // SCRUM-78
+const dashboardRoutes = require('./src/routes/dashboard.routes');   // SCRUM-67/68
+const reportesRoutes = require('./src/routes/reportes.routes');     // SCRUM-76
+const auditoriaRoutes = require('./src/routes/auditoria.routes');   // HU-15 / SCRUM-77
+
+// Reservas (routes/reservasRoutes.js y limpiarReservas.js) siguen desactivadas:
+// usan productos.stock y las tablas reservas_stock/detalles_reserva, que no
+// existen. La reserva de stock la hace el pedido al pasar a EN_PREPARACION
+// (fn_cambiar_estado_pedido, migraciones 016 y 018).
 
 const app = express();
+// Detrás del proxy de Railway/Render/Cloudflare la IP real del cliente llega en
+// X-Forwarded-For. Sin esto el límite de peticiones contaría a todos los
+// usuarios como una sola IP (la del proxy).
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
 const port = process.env.PORT || 3001;
 
 // =====================================================================
@@ -41,8 +48,6 @@ app.use(helmet());
 // Middlewares base
 app.use(cors());
 app.use(express.json());
-
-app.use(auditInterceptor);
 
 // 2. Sanitización contra XSS (Cross-Site Scripting)
 app.use(sanitizarXss);
@@ -60,24 +65,22 @@ const limiter = rateLimit({
     }
 });
 
-// Tus enrutadores actuales
-app.use('/api/sales', ventasRoutes);
-app.use('/api/users', usuariosRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-
-// Aplicar el limitador a todas las rutas de la API
+// Aplicar el limitador a todas las rutas de la API (antes de montarlas)
 app.use('/api', limiter);
 
 // =====================================================================
 // ENRUTADORES
 // =====================================================================
-app.use('/api/sales', ventasRoutes);
 app.use('/api/users', usuariosRoutes);
-// app.use('/api/reservations', reservasRoutes); // DESACTIVADO, ver arriba
-app.use('/api/inventory', inventarioRoutes); // SCRUM-94 / HU-05
-app.use('/api/customers', clientesRoutes); // SCRUM-98 / HU-09
-app.use('/api/orders', pedidosRoutes); // SCRUM-81 / HU-10
+app.use('/api/products', productosRoutes);
+app.use('/api/inventory', inventarioRoutes);
+app.use('/api/customers', clientesRoutes);
+app.use('/api/orders', pedidosRoutes);
+app.use('/api/sales', ventasRoutes);
+app.use('/api/payments', pagosRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportesRoutes);
+app.use('/api/audit', auditoriaRoutes);
 
 // =====================================================================
 // ENDPOINTS PRINCIPALES
@@ -90,278 +93,6 @@ app.get('/api/health', async (req, res) => {
         res.json({ status: 'ok', database: 'ok' });
     } catch (error) {
         res.status(503).json({ status: 'error', database: 'unavailable' });
-    }
-});
-
-// =====================================================================
-// ENDPOINT 1: POST /api/products (Tarea SCRUM-33)
-// =====================================================================
-app.post('/api/products', async (req, res) => {
-    try {
-        const {
-            id_categoria,
-            id_unidad,
-            sku,
-            nombre,
-            descripcion,
-            precio_compra,
-            precio_venta,
-            stock_minimo_bodega,
-            stock_minimo_almacen
-        } = req.body;
-
-        if (parseFloat(precio_venta) <= parseFloat(precio_compra)) {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "Regla de negocio no cumplida: El precio de venta debe ser obligatoriamente superior al precio de compra."
-            });
-        }
-
-        if (!id_categoria || !nombre || !precio_compra || !precio_venta) {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "Faltan campos obligatorios (id_categoria, id_unidad, sku, nombre, precio_compra, precio_venta)."
-            });
-        }
-
-        const insertQuery = `
-      INSERT INTO productos 
-      (id_categoria, id_unidad, sku, nombre, descripcion, precio_compra, precio_venta, stock_minimo_bodega, stock_minimo_almacen)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *;
-    `;
-
-        const values = [
-            id_categoria,
-            id_unidad,
-            sku,
-            nombre,
-            descripcion,
-            precio_compra,
-            precio_venta,
-            stock_minimo_bodega || 0,
-            stock_minimo_almacen || 0
-        ];
-
-        const result = await pool.query(insertQuery, values);
-        const nuevoProducto = result.rows[0];
-
-        res.status(201).json({
-            message: "Producto creado exitosamente",
-            producto: nuevoProducto
-        });
-
-    } catch (error) {
-        console.error('Error al insertar producto:', error);
-
-        if (error.code === '23505') {
-            return res.status(409).json({
-                error: "Conflict",
-                message: "El código SKU ya está registrado."
-            });
-        }
-
-        if (error.code === '23503') {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "El id_categoria o id_unidad proporcionado no existe en la base de datos."
-            });
-        }
-
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Error al guardar el producto en la base de datos."
-        });
-    }
-});
-
-// =====================================================================
-// ENDPOINT 2: GET /api/products (Tarea SCRUM-34)
-// =====================================================================
-app.get('/api/products', async (req, res) => {
-    try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const search = req.query.search || '';
-
-        if (page < 1 || limit < 1) {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "Los parámetros 'page' y 'limit' deben ser números enteros positivos."
-            });
-        }
-
-        const offset = (page - 1) * limit;
-
-        let baseWhere = `WHERE 1=1`;
-        let values = [];
-        let queryIndex = 1;
-
-        if (search.trim() !== '') {
-            baseWhere += ` AND (nombre ILIKE $${queryIndex} OR sku = $${queryIndex + 1})`;
-            values.push(`%${search.trim()}%`);
-            values.push(search.trim());
-            queryIndex += 2;
-        }
-
-        const countQuery = `SELECT COUNT(*) FROM productos ${baseWhere}`;
-        const totalResult = await pool.query(countQuery, values);
-        const totalItems = parseInt(totalResult.rows[0].count);
-        const totalPages = Math.ceil(totalItems / limit);
-
-        const selectQuery = `
-            SELECT 
-                id_producto, 
-                id_categoria, 
-                id_unidad,
-                sku, 
-                nombre, 
-                descripcion, 
-                precio_compra, 
-                precio_venta, 
-                stock_total, 
-                stock_minimo_bodega,
-                stock_minimo_almacen,
-                estado 
-            FROM productos 
-            ${baseWhere} 
-            ORDER BY id_producto DESC 
-            LIMIT $${queryIndex} OFFSET $${queryIndex + 1}
-        `;
-
-        values.push(limit);
-        values.push(offset);
-
-        const productsResult = await pool.query(selectQuery, values);
-
-        res.status(200).json({
-            data: productsResult.rows,
-            meta: {
-                totalItems: totalItems,
-                itemsPerPage: limit,
-                totalPages: totalPages,
-                currentPage: page,
-                hasNextPage: page < totalPages,
-                hasPrevPage: page > 1
-            }
-        });
-
-    } catch (error) {
-        console.error('Error al obtener los productos:', error);
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Ocurrió un problema al consultar la base de datos."
-        });
-    }
-});
-
-// =====================================================================
-// ENDPOINT 3: PUT /api/products/:id (Tarea SCRUM-35)
-// =====================================================================
-app.put('/api/products/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        if (isNaN(id)) {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "El ID del producto debe ser un valor numérico entero."
-            });
-        }
-
-        const productCheck = await pool.query('SELECT * FROM productos WHERE id_producto = $1', [id]);
-        if (productCheck.rows.length === 0) {
-            return res.status(404).json({
-                error: "Not Found",
-                message: `No existe ningún producto con el ID ${id}.`
-            });
-        }
-
-        const productoActual = productCheck.rows[0];
-
-        const {
-            id_categoria,
-            id_unidad,
-            sku,
-            nombre,
-            descripcion,
-            precio_compra,
-            precio_venta,
-            stock_minimo_bodega,
-            stock_minimo_almacen,
-            estado
-        } = req.body;
-
-        const finalPrecioCompra = precio_compra !== undefined ? parseFloat(precio_compra) : parseFloat(productoActual.precio_compra);
-        const finalPrecioVenta = precio_venta !== undefined ? parseFloat(precio_venta) : parseFloat(productoActual.precio_venta);
-
-        if (finalPrecioVenta <= finalPrecioCompra) {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "Regla de negocio no cumplida: El precio de venta debe ser obligatoriamente superior al precio de compra."
-            });
-        }
-
-        const updateQuery = `
-            UPDATE productos 
-            SET 
-                id_categoria = COALESCE($1, id_categoria),
-                id_unidad = COALESCE($2, id_unidad),
-                sku = COALESCE($3, sku),
-                nombre = COALESCE($4, nombre),
-                descripcion = COALESCE($5, descripcion),
-                precio_compra = COALESCE($6, precio_compra),
-                precio_venta = COALESCE($7, precio_venta),
-                stock_minimo_bodega = COALESCE($8, stock_minimo_bodega),
-                stock_minimo_almacen = COALESCE($9, stock_minimo_almacen),
-                estado = COALESCE($10, estado)
-            WHERE id_producto = $11
-            RETURNING *;
-        `;
-
-        const values = [
-            id_categoria !== undefined ? id_categoria : null,
-            id_unidad !== undefined ? id_unidad : null,
-            sku !== undefined ? sku : null,
-            nombre !== undefined ? nombre : null,
-            descripcion !== undefined ? descripcion : null,
-            precio_compra !== undefined ? precio_compra : null,
-            precio_venta !== undefined ? precio_venta : null,
-            stock_minimo_bodega !== undefined ? stock_minimo_bodega : null,
-            stock_minimo_almacen !== undefined ? stock_minimo_almacen : null,
-            estado !== undefined ? estado : null,
-            id
-        ];
-
-        const result = await pool.query(updateQuery, values);
-        const productoActualizado = result.rows[0];
-
-        res.status(200).json({
-            message: "Producto actualizado exitosamente",
-            producto: productoActualizado
-        });
-
-    } catch (error) {
-        console.error('Error al actualizar producto:', error);
-
-        if (error.code === '23505') {
-            return res.status(409).json({
-                error: "Conflict",
-                message: "El SKU ingresado ya pertenece a otro producto."
-            });
-        }
-
-        if (error.code === '23503') {
-            return res.status(400).json({
-                error: "Bad Request",
-                message: "El id_categoria especificado no existe en la base de datos."
-            });
-        }
-
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Error al actualizar el producto en la base de datos."
-        });
     }
 });
 
@@ -505,21 +236,9 @@ app.use((req, res, next) => {
 
 // 2. Middleware Global de Manejo de Errores (DEBE SER EL ÚLTIMO app.use)
 app.use(errorHandler);
-// Iniciar procesos en segundo plano
-// iniciarLimpiezaDeReservas(); // DESACTIVADO, ver arriba
 
-// =====================================================================
-// INICIALIZACIÓN DE TAREAS PROGRAMADAS (CRON JOBS)
-// =====================================================================
-iniciarLimpiezaDeReservas(); // El que ya tenías (SCRUM-130)
-iniciarAuditoriaPedidos();   // El nuevo de medianoche (SCRUM-69)
-
-// =====================================================================
-// INICIALIZACIÓN DEL SERVIDOR
-// =====================================================================
-app.listen(port, () => {
-    console.log(`Servidor corriendo en http://localhost:${port}`);
-});
+// Tarea programada de medianoche: pedidos vencidos (SCRUM-69)
+iniciarAuditoriaPedidos();
 
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);

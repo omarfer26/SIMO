@@ -10,6 +10,7 @@ const {
     registrarAjuste,
     obtenerKardex,
     resumenProductoKardex,
+    registrarTraslado,
 } = require('../repositories/inventario.repository');
 const { aInstante } = require('../utils/fechas');
 const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../utils/numeros');
@@ -369,4 +370,54 @@ async function getKardex(req, res) {
     }
 }
 
-module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste, getKardex };
+// =====================================================================
+// POST /api/inventory/transfers (HU-06, contrato del frontend SCRUM-124)
+// Body: { id_producto, cantidad, id_responsable?, motivo? }
+// Pasa unidades de Bodega al Almacén. Quien registra sale del token;
+// id_responsable es quien entrega y firma (por defecto, quien registra).
+// =====================================================================
+async function postTraslado(req, res) {
+    try {
+        const idUsuario = req.user?.id_usuario;
+        if (!REGEX_ENTERO_POSITIVO.test(String(idUsuario ?? ''))) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'No se pudo identificar al usuario de la sesión.' });
+        }
+        const { id_producto, cantidad, id_responsable } = req.body || {};
+        const motivo = req.body?.motivo ?? req.body?.justificacion;
+
+        if (!REGEX_ENTERO_POSITIVO.test(String(id_producto ?? ''))) {
+            return badRequest(res, 'El id_producto es obligatorio y debe ser un entero positivo.');
+        }
+        const cantidadNumero = aNumero(cantidad);
+        if (Number.isNaN(cantidadNumero)) return badRequest(res, 'La cantidad es obligatoria y debe ser numérica.');
+        if (cantidadNumero <= 0) return badRequest(res, 'La cantidad a trasladar debe ser mayor a cero.');
+        if (excedeDecimales(cantidadNumero, 3) || cantidadNumero > 999999999) {
+            return badRequest(res, 'La cantidad admite máximo 3 decimales y 9 dígitos enteros.');
+        }
+        if (id_responsable !== undefined && id_responsable !== null && !REGEX_ENTERO_POSITIVO.test(String(id_responsable))) {
+            return badRequest(res, 'El id_responsable debe ser un entero positivo.');
+        }
+        if (motivo !== undefined && motivo !== null && (typeof motivo !== 'string' || motivo.length > 500)) {
+            return badRequest(res, 'El motivo debe ser un texto de máximo 500 caracteres.');
+        }
+
+        const t = await registrarTraslado({
+            idProducto: Number(id_producto),
+            cantidad: cantidadNumero,
+            idUsuario: Number(idUsuario),
+            idResponsable: id_responsable ? Number(id_responsable) : null,
+            motivo: typeof motivo === 'string' ? motivo.trim() : null,
+        });
+        return res.status(201).json({ message: 'Traslado registrado', traslado: t });
+    } catch (error) {
+        const negocio = ERRORES_NEGOCIO[error.code];
+        if (negocio) {
+            const [status, nombre] = negocio;
+            return res.status(status).json({ error: nombre, message: `${error.message}.` });
+        }
+        console.error('[POST /api/inventory/transfers] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al registrar el traslado.' });
+    }
+}
+
+module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste, getKardex, postTraslado };

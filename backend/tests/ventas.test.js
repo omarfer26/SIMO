@@ -1,151 +1,71 @@
 // backend/tests/ventas.test.js
-const request = require('supertest');
-const express = require('express');
+// Pruebas unitarias (Jest, `npm test`): no necesitan base de datos.
+//
+// La venta POS dejó de armarse en JavaScript: ahora la ejecuta la función
+// fn_registrar_venta de PostgreSQL (migración 020), así que simular la base
+// con mocks ya no prueba nada real. La venta, el descuento de stock en
+// cascada y la anulación se prueban contra una base de verdad en:
+//   - db/tests/010_ventas_traslados_pagos.sql        (47 pruebas SQL)
+//   - tests/integracion/ventas.test.js               (npm run test:integracion)
+// Aquí quedan las reglas que sí viven en JavaScript: la validación de números
+// y fechas que llegan del navegador, y el filtro contra XSS.
+const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../src/utils/numeros');
+const { aInstante } = require('../src/utils/fechas');
+const { limpiar } = require('../middleware/sanitizarXss');
 
-// 1. MOCK: Simulamos la base de datos para no afectar Neon
-jest.mock('../db', () => {
-    const mClient = {
-        query: jest.fn(),
-        release: jest.fn(),
-    };
-    return {
-        connect: jest.fn(() => mClient)
-    };
+describe('Cantidades y precios que llegan del POS', () => {
+    it('acepta números y texto numérico, rechaza vacíos y texto', () => {
+        expect(aNumero(2)).toBe(2);
+        expect(aNumero('2.5')).toBe(2.5);
+        expect(aNumero('')).toBeNaN();
+        expect(aNumero('dos')).toBeNaN();
+        expect(aNumero(null)).toBeNaN();
+        expect(aNumero(Infinity)).toBeNaN();
+    });
+
+    it('limita los decimales: 3 en cantidades y 2 en dinero', () => {
+        expect(excedeDecimales(1.125, 3)).toBe(false);
+        expect(excedeDecimales(1.1255, 3)).toBe(true);
+        expect(excedeDecimales(0.1 + 0.2, 2)).toBe(false); // tolera el error binario de punto flotante
+        expect(excedeDecimales(19.999, 2)).toBe(true);
+    });
+
+    it('los identificadores son enteros positivos', () => {
+        expect(REGEX_ENTERO_POSITIVO.test('15')).toBe(true);
+        for (const malo of ['0', '-1', '1.5', 'abc', '', '1 OR 1=1']) {
+            expect(REGEX_ENTERO_POSITIVO.test(malo)).toBe(false);
+        }
+    });
 });
 
-// 2. MOCK: Simulamos el Auth Middleware para pasar la seguridad en las pruebas
-jest.mock('../middleware/authMiddleware', () => ({
-    verificarToken: (req, res, next) => {
-        req.usuario = { id_usuario: 1, id_rol: 1 }; // Simulamos ser el ADMIN
-        next();
-    },
-    verificarRol: () => (req, res, next) => next()
-}));
-
-const pool = require('../db');
-const ventasRoutes = require('../routes/ventasRoutes');
-
-// 3. Configurar una app Express temporal solo para las pruebas
-const app = express();
-app.use(express.json());
-app.use('/api/sales', ventasRoutes);
-
-describe('POST /api/sales - Pruebas de Integración y Deducción en Cascada (HU-07)', () => {
-    let client;
-
-    beforeEach(() => {
-        // Reiniciamos los mocks antes de cada prueba
-        client = {
-            query: jest.fn(),
-            release: jest.fn(),
-        };
-        pool.connect.mockResolvedValue(client);
+describe('Fechas de los filtros (hora de Colombia)', () => {
+    it('una fecha sin hora cubre el día completo en UTC-5', () => {
+        expect(aInstante('2026-11-09', false).toISOString()).toBe('2026-11-09T05:00:00.000Z');
+        expect(aInstante('2026-11-09', true).toISOString()).toBe('2026-11-10T04:59:59.999Z');
     });
 
-    afterEach(() => {
-        jest.clearAllMocks();
+    it('distingue "no vino" (null) de "inválida" (undefined)', () => {
+        expect(aInstante(undefined)).toBeNull();
+        expect(aInstante('')).toBeNull();
+        expect(aInstante('ayer')).toBeUndefined();
+        expect(aInstante('2026-02-30')).toBeUndefined(); // día que no existe
+        expect(aInstante('2026-13-01')).toBeUndefined();
+        expect(aInstante(20261109)).toBeUndefined();
     });
 
-    it('Debe procesar la venta con deducción en cascada (Almacén + Bodega) y devolver HTTP 201 (HU-07)', async () => {
-        // Simulamos un producto que tiene 2 en Almacén y 8 en Bodega (Total = 10)
-        // El cliente compra 5 unidades. Se deben descontar 2 de Almacén y 3 de Bodega sin perder la venta.
-        client.query
-            .mockResolvedValueOnce({}) // BEGIN
-            .mockResolvedValueOnce({   // SELECT metodos_pago
-                rowCount: 1,
-                rows: [{ id_metodo_pago: 1 }]
-            })
-            .mockResolvedValueOnce({   // SELECT ... FOR UPDATE (Producto con stock dual)
-                rowCount: 1,
-                rows: [{
-                    id_producto: 1,
-                    nombre: 'Teclado Gamer',
-                    precio_compra: 40000,
-                    precio_venta: 75000,
-                    stock_bodega: 8,
-                    stock_almacen: 2,
-                    stock_total: 10,
-                    estado: true
-                }]
-            })
-            .mockResolvedValueOnce({   // INSERT ventas
-                rowCount: 1,
-                rows: [{ id_venta: 100, fecha_venta: new Date().toISOString() }]
-            })
-            .mockResolvedValueOnce({}) // INSERT detalles_ventas
-            .mockResolvedValueOnce({}) // UPDATE productos (stock_almacen = 0, stock_bodega = 5)
-            .mockResolvedValueOnce({}) // INSERT movimientos_inventario (SALIDA_VENTA ALMACEN = 2)
-            .mockResolvedValueOnce({}) // INSERT movimientos_inventario (SALIDA_VENTA BODEGA = 3)
-            .mockResolvedValueOnce({}); // COMMIT
+    it('acepta fecha y hora ISO 8601', () => {
+        expect(aInstante('2026-11-09T15:30:00Z').toISOString()).toBe('2026-11-09T15:30:00.000Z');
+    });
+});
 
-        const response = await request(app)
-            .post('/api/sales')
-            .send({
-                metodo_pago: 'EFECTIVO',
-                productos: [{ id_producto: 1, cantidad: 5 }]
-            });
-
-        // Verificamos los códigos de estado HTTP esperados
-        expect(response.status).toBe(201);
-        expect(response.body.message).toContain('deducción en cascada');
-        expect(response.body.venta.detalles[0].deduccion_cascada).toEqual({
-            desde_almacen: 2,
-            desde_bodega: 3
-        });
-
-        // Verificamos que se haya ejecutado el UPDATE de stock dual con los nuevos saldos
-        const updateCall = client.query.mock.calls.find(call =>
-            call[0].includes('UPDATE productos') && call[0].includes('stock_almacen = $1')
-        );
-        expect(updateCall).toBeDefined();
-        // nuevoAlmacen = 0, nuevoBodega = 5, id_producto = 1
-        expect(updateCall[1]).toEqual([0, 5, 1]);
-
-        // Verificamos que se hayan generado los 2 movimientos de Kardex (Almacén y Bodega)
-        const kardexCalls = client.query.mock.calls.filter(call =>
-            call[0].includes('INSERT INTO movimientos_inventario')
-        );
-        expect(kardexCalls.length).toBe(2);
-        expect(kardexCalls[0][0]).toContain("'ALMACEN'");
-        expect(kardexCalls[0][1][1]).toBe(2); // 2 unidades de almacén
-        expect(kardexCalls[1][0]).toContain("'BODEGA'");
-        expect(kardexCalls[1][1][1]).toBe(3); // 3 unidades de bodega
+describe('Filtro contra XSS', () => {
+    it('neutraliza las etiquetas sin alterar el resto del texto', () => {
+        expect(limpiar('<script>alert(1)</script>')).toBe('&lt;script&gt;alert(1)&lt;/script&gt;');
+        // Contraseñas, direcciones y URLs no deben cambiar
+        expect(limpiar("Calle 10 # 5/20 & O'Brien \"apto\"")).toBe("Calle 10 # 5/20 & O'Brien \"apto\"");
     });
 
-    it('Debe devolver error HTTP 400 y hacer ROLLBACK si no hay stock total suficiente', async () => {
-        client.query
-            .mockResolvedValueOnce({}) // BEGIN
-            .mockResolvedValueOnce({   // SELECT metodos_pago
-                rowCount: 1,
-                rows: [{ id_metodo_pago: 1 }]
-            })
-            .mockResolvedValueOnce({   // SELECT ... FOR UPDATE (Producto con stock insuficiente en total)
-                rowCount: 1,
-                rows: [{
-                    id_producto: 2,
-                    nombre: 'Hamburguesa',
-                    precio_compra: 8000,
-                    precio_venta: 15000,
-                    stock_bodega: 1,
-                    stock_almacen: 0,
-                    stock_total: 1,
-                    estado: true
-                }]
-            })
-            .mockResolvedValueOnce({}); // ROLLBACK
-
-        const response = await request(app)
-            .post('/api/sales')
-            .send({
-                productos: [{ id_producto: 2, cantidad: 5 }] // Intentamos comprar 5 habiendo solo 1
-            });
-
-        // Verificamos los códigos de estado HTTP esperados
-        expect(response.status).toBe(400);
-        expect(response.body.message).toContain('Stock insuficiente');
-
-        // Verificamos que se haya ejecutado el ROLLBACK para cancelar la transacción
-        const rollbackCall = client.query.mock.calls.find(call => call[0] === 'ROLLBACK');
-        expect(rollbackCall).toBeDefined();
+    it('recorre objetos y listas anidados y respeta lo que no es texto', () => {
+        expect(limpiar({ a: ['<b>', 3, null, true], b: { c: '>' } })).toEqual({ a: ['&lt;b&gt;', 3, null, true], b: { c: '&gt;' } });
     });
 });
