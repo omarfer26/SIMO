@@ -16,15 +16,18 @@ export function permiteDecimales(unidadMedida: string): boolean {
   return UNIDADES_CON_DECIMALES.includes(unidadMedida.trim().toLowerCase());
 }
 
+// SCRUM-156 (Camilo) — La firma ya no es una casilla del mismo formulario:
+// se pide en el paso de confirmación (ver FormularioTraslado). Por eso los
+// datos (paso 1) y la firma (paso 2) se validan por separado.
 export interface CamposTraslado {
   cantidadTexto: string;
   idResponsable: number | null;
   justificacion: string;
-  firmado: boolean;
 }
 
 export type CampoTraslado = "cantidad" | "responsable" | "justificacion" | "firma";
 
+/** Paso 1: cantidad, responsable y justificación. */
 export function validarTraslado(
   campos: CamposTraslado,
   stockBodega: number,
@@ -45,11 +48,34 @@ export function validarTraslado(
   const errorDeJustificacion = errorJustificacion(campos.justificacion, "traslado");
   if (errorDeJustificacion) errores.justificacion = errorDeJustificacion;
 
-  if (!campos.firmado) {
-    errores.firma = "El responsable debe confirmar el traslado.";
-  }
-
   return errores;
+}
+
+// SCRUM-156 (Camilo) — Para comparar la firma con el nombre del responsable
+// sin que importen mayúsculas, tildes ni espacios de más: "  maría  GÓMEZ"
+// firma igual que "María Gómez". NFD separa la tilde de la letra y el
+// reemplazo borra las tildes sueltas.
+function normalizarNombre(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function firmaCoincide(firma: string, nombreResponsable: string): boolean {
+  const esperado = normalizarNombre(nombreResponsable);
+  return esperado !== "" && normalizarNombre(firma) === esperado;
+}
+
+/** Paso 2: el responsable firma escribiendo su nombre completo. */
+export function errorFirmaTraslado(firma: string, nombreResponsable: string): string | undefined {
+  if (firma.trim() === "") return "El responsable debe escribir su nombre completo para firmar.";
+  if (!firmaCoincide(firma, nombreResponsable)) {
+    return `La firma no coincide con el nombre del responsable (${nombreResponsable}).`;
+  }
+  return undefined;
 }
 
 // SCRUM-38 (Camilo) — Revisión de cantidad que antes estaba dentro de

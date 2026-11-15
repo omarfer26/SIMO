@@ -16,7 +16,7 @@ import Link from "next/link";
 import BusquedaCatalogo from "@/components/catalogo/BusquedaCatalogo";
 import { useProductos } from "@/components/catalogo/ProductosContext";
 import FormularioAjuste from "@/components/inventario/FormularioAjuste";
-import FormularioTraslado from "@/components/inventario/FormularioTraslado";
+import FormularioTraslado, { type PasoTraslado } from "@/components/inventario/FormularioTraslado";
 import { puedeGestionarCatalogo, puedeVerKardex } from "@/lib/auth/permisos";
 import { useRolSesion } from "@/lib/auth/useRolSesion";
 import { NOMBRE_UBICACION } from "@/lib/inventario/validaciones";
@@ -44,6 +44,10 @@ export default function CatalogoPage() {
   const [aperturas, setAperturas] = useState(0);
   const [aviso, setAviso] = useState("");
   const productoTraslado = productos.find((p) => p.id === idTraslado);
+  // SCRUM-156 (Camilo) — En qué paso va el traslado, para el título del
+  // modal: "Trasladar de Bodega a Almacén" (datos) o "Confirmar traslado"
+  // (resumen + firma del responsable).
+  const [pasoTraslado, setPasoTraslado] = useState<PasoTraslado>("datos");
 
   // SCRUM-38 (Camilo) — Modal de ajuste manual de stock. Funciona igual que
   // el de traslado (mismo truco del id y de `aperturas`).
@@ -114,6 +118,7 @@ export default function CatalogoPage() {
                 ? (producto) => {
                     setIdTraslado(producto.id);
                     setAperturas((n) => n + 1);
+                    setPasoTraslado("datos");
                     setTrasladando(true);
                   }
                 : undefined
@@ -138,7 +143,7 @@ export default function CatalogoPage() {
       <Modal
         isOpen={trasladando}
         onClose={() => setTrasladando(false)}
-        title="Trasladar de Bodega a Almacén"
+        title={pasoTraslado === "confirmar" ? "Confirmar traslado" : "Trasladar de Bodega a Almacén"}
         maxWidth="lg"
         closeOnBackdropClick={false}
       >
@@ -147,6 +152,7 @@ export default function CatalogoPage() {
             key={aperturas}
             producto={productoTraslado}
             onCancelar={() => setTrasladando(false)}
+            onCambiarPaso={setPasoTraslado}
             onRegistrado={(traslado, responsable) => {
               actualizarUbicaciones(productoTraslado.id, traslado.saldoBodega, traslado.saldoAlmacen);
               setTrasladando(false);
