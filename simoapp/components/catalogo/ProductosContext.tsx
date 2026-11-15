@@ -33,6 +33,14 @@ import type { Categoria, Producto } from "./tipos";
 
 type ProductoNuevo = Omit<Producto, "id" | "stockActual" | "stockBodega" | "stockAlmacen" | "estado">;
 
+// SCRUM-155 (Camilo) — Resultado de crear un producto. Antes la función no
+// devolvía nada: si el backend lo rechazaba salía un alert() y el formulario
+// igual mostraba "¡Éxito!". Ahora dice si se guardó y, si no, por qué y en
+// qué campo (para pintar el error debajo de ese campo).
+export type ResultadoAgregarProducto =
+  | { ok: true }
+  | { ok: false; mensaje: string; campo?: "codigo" | "precioVenta" };
+
 // De dónde salió la lista que se está mostrando.
 export type OrigenProductos = "cargando" | "backend" | "error";
 
@@ -41,7 +49,7 @@ interface ProductosContextValue {
   origen: OrigenProductos;
   /** Momento del último GET /products que sí respondió (null si aún no hay). */
   ultimaSincronizacion: Date | null;
-  agregarProducto: (datos: ProductoNuevo) => Promise<void>;
+  agregarProducto: (datos: ProductoNuevo) => Promise<ResultadoAgregarProducto>;
   descontarStock: (vendidos: { id: number; cantidad: number }[]) => void;
   reponerStock: (devueltos: { id: number; cantidad: number }[]) => void;
   actualizarUbicaciones: (id: number, saldoBodega: number, saldoAlmacen: number) => void;
@@ -198,7 +206,7 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  async function agregarProducto(datos: ProductoNuevo) {
+  async function agregarProducto(datos: ProductoNuevo): Promise<ResultadoAgregarProducto> {
     try {
       const categoryMap: Record<string, number> = {
         "Electrónica": 1,
@@ -239,11 +247,20 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify(payload)
       });
 
+      // SCRUM-155 (Camilo) — Sin alert(): el error vuelve al formulario.
+      // 409 = SKU repetido (eso solo lo sabe la base de datos). El mensaje
+      // de la regla de precios se reconoce por su texto (REGLA_PRECIO en
+      // backend/src/routes/productos.routes.js).
       if (!res.ok) {
-        const errorData = await res.json();
-        console.error("Error from backend:", errorData);
-        alert(`Error: ${errorData.message}`);
-        return;
+        const errorData = await res.json().catch(() => ({}));
+        console.error("El backend rechazó el producto:", errorData);
+        const mensaje: string =
+          typeof errorData?.message === "string"
+            ? errorData.message
+            : `El servidor respondió con el código ${res.status}.`;
+        if (res.status === 409) return { ok: false, mensaje, campo: "codigo" };
+        if (/precio de venta/i.test(mensaje)) return { ok: false, mensaje, campo: "precioVenta" };
+        return { ok: false, mensaje };
       }
 
       const { producto } = await res.json();
@@ -261,9 +278,13 @@ export function ProductosProvider({ children }: { children: ReactNode }) {
           estado: producto.estado ? "Activo" : "Inactivo",
         },
       ]);
+      return { ok: true };
     } catch (error) {
       console.error("Error conectando al backend", error);
-      alert("Error conectando al backend");
+      return {
+        ok: false,
+        mensaje: "No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.",
+      };
     }
   }
 

@@ -9,43 +9,125 @@
 // (antes usaba nombres distintos: `sku` en vez de `codigo`, `unidad` en vez
 // de `unidadMedida`, y categoría como texto libre en vez del select con las
 // 5 categorías válidas).
+//
+// SCRUM-155 (Camilo) — Validación con React Hook Form + Zod. Antes solo
+// estaba la validación del navegador (required, min="0"), que no revisaba
+// espacios en el SKU ni que la venta superara la compra, y sus mensajes
+// salían en el idioma del navegador. Ahora:
+//  - Las reglas viven en lib/catalogo/esquemaProducto.ts.
+//  - Cada campo se revisa al salir de él y, desde ahí, mientras se escribe
+//    (mode "onTouched"). El error sale en rojo debajo del campo.
+//  - Si algo no cumple, NO se llama a la API.
+//  - Si la API rechaza el producto (p. ej. SKU repetido), el error sale en
+//    el campo o arriba del formulario, y ya no aparece "¡Éxito!" por error.
+
 import { useState } from "react";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useProductos } from "@/components/catalogo/ProductosContext";
-import { CATEGORIAS, type Categoria } from "@/components/catalogo/tipos";
+import { CATEGORIAS } from "@/components/catalogo/tipos";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
+import {
+    esquemaProducto,
+    type ProductoFormulario,
+    type ProductoValidado,
+} from "@/lib/catalogo/esquemaProducto";
+
+// Valores con los que arranca (y vuelve con "Limpiar datos" o después de
+// crear un producto). Los números van como "" para que el campo se vea
+// vacío y no con un 0. Ojo: si se dejan sin poner, reset() NO borra lo que
+// el usuario escribió en ellos (pasó en las pruebas). Si se envía vacío,
+// Zod recibe "" y responde "Escribe el precio...".
+const VACIO_NUMERICO = "" as unknown as number;
+const VALORES_INICIALES: ProductoFormulario = {
+    codigo: "",
+    nombre: "",
+    descripcion: "",
+    categoria: "" as ProductoFormulario["categoria"],
+    unidadMedida: "",
+    precioCompra: VACIO_NUMERICO,
+    precioVenta: VACIO_NUMERICO,
+    stockMinimo: VACIO_NUMERICO,
+};
+
+// SCRUM-155 (Camilo) — Clases del input según tenga error o no: borde rojo
+// si falló la validación, el borde gris de siempre si no.
+function claseCampo(hayError: boolean, extra = "") {
+    const borde = hayError
+        ? "border-red-500 focus:ring-red-500"
+        : "border-gray-400 focus:ring-blue-500";
+    return `w-full border ${borde} rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:border-transparent placeholder-gray-400 ${extra}`;
+}
+
+// SCRUM-155 (Camilo) — Mensaje de error debajo de un campo. Va en una
+// etiqueta con fondo rojo claro porque el texto rojo solo no se leía bien
+// sobre el fondo gris del formulario. El id permite que el lector de
+// pantalla lo lea junto con el campo (aria-describedby).
+function MensajeError({ id, mensaje }: { id: string; mensaje?: string }) {
+    if (!mensaje) return null;
+    return (
+        <p
+            id={id}
+            role="alert"
+            className="mt-1.5 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-sm font-medium text-red-700"
+        >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true">
+                <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+            </svg>
+            <span>{mensaje}</span>
+        </p>
+    );
+}
 
 export default function FormularioProductosPage() {
     const { agregarProducto } = useProductos();
     const [showNotification, setShowNotification] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    // Error que no es de un campo puntual (servidor caído, falta de permiso...).
+    const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        setIsSubmitting(true);
+    const {
+        register,
+        handleSubmit,
+        reset,
+        setError,
+        formState: { errors, isSubmitting },
+    } = useForm<ProductoFormulario, unknown, ProductoValidado>({
+        resolver: zodResolver(esquemaProducto),
+        mode: "onTouched",
+        defaultValues: VALORES_INICIALES,
+    });
 
-        // (Camilo) — Se guarda el formulario en una variable antes del
-        // `await`: después de esperar al backend, React deja
-        // e.currentTarget en null y el reset() de abajo fallaba.
-        const form = e.currentTarget;
-        const formData = new FormData(form);
+    // Solo se ejecuta si Zod aprobó todo; `datos` ya viene limpio (sin
+    // espacios de sobra y con los precios como número).
+    const onSubmit = async (datos: ProductoValidado) => {
+        setErrorGeneral(null);
+        const resultado = await agregarProducto(datos);
 
-        await agregarProducto({
-            codigo: String(formData.get("codigo")),
-            nombre: String(formData.get("nombre")),
-            descripcion: String(formData.get("descripcion")),
-            categoria: formData.get("categoria") as Categoria,
-            unidadMedida: String(formData.get("unidadMedida")),
-            precioCompra: Number(formData.get("precioCompra")),
-            precioVenta: Number(formData.get("precioVenta")),
-            stockMinimo: Number(formData.get("stockMinimo")),
-        });
+        if (!resultado.ok) {
+            if (resultado.campo) {
+                setError(resultado.campo, { message: resultado.mensaje }, { shouldFocus: true });
+            } else {
+                setErrorGeneral(resultado.mensaje);
+            }
+            return;
+        }
 
-        form.reset();
-        setIsSubmitting(false);
+        reset(VALORES_INICIALES);
         setShowNotification(true);
     };
+
+    const limpiar = () => {
+        reset(VALORES_INICIALES);
+        setErrorGeneral(null);
+    };
+
+    // Atributos de accesibilidad comunes a cada campo con posible error.
+    const accesible = (campo: keyof ProductoFormulario) => ({
+        "aria-invalid": errors[campo] ? true : undefined,
+        "aria-describedby": errors[campo] ? `error-${campo}` : undefined,
+    });
 
     return (
         <main className="mx-auto w-full max-w-4xl p-4 md:p-8">
@@ -80,8 +162,8 @@ export default function FormularioProductosPage() {
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                         <h1 className="text-2xl font-bold text-white">Crear Nuevo Producto</h1>
                         <button
-                            type="reset"
-                            form="producto-form"
+                            type="button"
+                            onClick={limpiar}
                             className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
                         >
                             Limpiar datos
@@ -90,7 +172,18 @@ export default function FormularioProductosPage() {
                     <hr className="mt-4 border-gray-300" />
                 </div>
 
-                <form id="producto-form" className="space-y-6" onSubmit={handleSubmit}>
+                {/* noValidate apaga los globos del navegador: los mensajes
+                    los pone Zod, en español y debajo de cada campo. */}
+                <form id="producto-form" className="space-y-6" onSubmit={handleSubmit(onSubmit)} noValidate>
+                    {errorGeneral && (
+                        <div
+                            role="alert"
+                            className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+                        >
+                            No se pudo crear el producto: {errorGeneral}
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="col-span-1">
                             <label htmlFor="codigo" className="block text-sm font-semibold mb-2">
@@ -99,11 +192,13 @@ export default function FormularioProductosPage() {
                             <input
                                 type="text"
                                 id="codigo"
-                                name="codigo"
-                                required
                                 placeholder="Ej: PROD-1002"
-                                className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                                autoComplete="off"
+                                className={claseCampo(!!errors.codigo)}
+                                {...accesible("codigo")}
+                                {...register("codigo")}
                             />
+                            <MensajeError id="error-codigo" mensaje={errors.codigo?.message} />
                         </div>
 
                         <div className="col-span-1 md:col-span-2">
@@ -113,24 +208,25 @@ export default function FormularioProductosPage() {
                             <input
                                 type="text"
                                 id="nombre"
-                                name="nombre"
-                                required
                                 placeholder="Ingrese el nombre"
-                                className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                                className={claseCampo(!!errors.nombre)}
+                                {...accesible("nombre")}
+                                {...register("nombre")}
                             />
+                            <MensajeError id="error-nombre" mensaje={errors.nombre?.message} />
                         </div>
                     </div>
 
                     <div>
                         <label htmlFor="descripcion" className="block text-sm font-semibold mb-2">
-                            Descripción
+                            Descripción <span className="font-normal text-gray-400">(opcional)</span>
                         </label>
                         <textarea
                             id="descripcion"
-                            name="descripcion"
                             rows={4}
                             placeholder="Breve detalle de las especificaciones del producto..."
-                            className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400 resize-none"
+                            className={claseCampo(!!errors.descripcion, "resize-none")}
+                            {...register("descripcion")}
                         ></textarea>
                     </div>
 
@@ -141,10 +237,9 @@ export default function FormularioProductosPage() {
                             </label>
                             <select
                                 id="categoria"
-                                name="categoria"
-                                required
-                                defaultValue=""
-                                className="w-full border border-gray-400 text-gray-800 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={claseCampo(!!errors.categoria, "text-gray-800")}
+                                {...accesible("categoria")}
+                                {...register("categoria")}
                             >
                                 <option value="" disabled>
                                     Seleccione una categoría
@@ -155,6 +250,7 @@ export default function FormularioProductosPage() {
                                     </option>
                                 ))}
                             </select>
+                            <MensajeError id="error-categoria" mensaje={errors.categoria?.message} />
                         </div>
 
                         <div>
@@ -164,11 +260,12 @@ export default function FormularioProductosPage() {
                             <input
                                 type="text"
                                 id="unidadMedida"
-                                name="unidadMedida"
-                                required
                                 placeholder="Ej: Unidad, Litros, Kg"
-                                className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                                className={claseCampo(!!errors.unidadMedida)}
+                                {...accesible("unidadMedida")}
+                                {...register("unidadMedida")}
                             />
+                            <MensajeError id="error-unidadMedida" mensaje={errors.unidadMedida?.message} />
                         </div>
                     </div>
 
@@ -177,16 +274,22 @@ export default function FormularioProductosPage() {
                             <label htmlFor="precioCompra" className="block text-sm font-semibold mb-2">
                                 Precio de Compra
                             </label>
+                            {/* valueAsNumber: React Hook Form entrega un número
+                                (o NaN si está vacío) en vez de texto. deps:
+                                al cambiar la compra se vuelve a revisar la
+                                venta, por la regla "venta > compra". */}
                             <input
                                 type="number"
                                 id="precioCompra"
-                                name="precioCompra"
-                                required
                                 min="0"
                                 placeholder="0.00"
                                 step="0.01"
-                                className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                                inputMode="decimal"
+                                className={claseCampo(!!errors.precioCompra)}
+                                {...accesible("precioCompra")}
+                                {...register("precioCompra", { valueAsNumber: true, deps: ["precioVenta"] })}
                             />
+                            <MensajeError id="error-precioCompra" mensaje={errors.precioCompra?.message} />
                         </div>
 
                         <div>
@@ -196,13 +299,15 @@ export default function FormularioProductosPage() {
                             <input
                                 type="number"
                                 id="precioVenta"
-                                name="precioVenta"
-                                required
                                 min="0"
                                 placeholder="0.00"
                                 step="0.01"
-                                className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                                inputMode="decimal"
+                                className={claseCampo(!!errors.precioVenta)}
+                                {...accesible("precioVenta")}
+                                {...register("precioVenta", { valueAsNumber: true })}
                             />
+                            <MensajeError id="error-precioVenta" mensaje={errors.precioVenta?.message} />
                         </div>
 
                         <div>
@@ -212,12 +317,14 @@ export default function FormularioProductosPage() {
                             <input
                                 type="number"
                                 id="stockMinimo"
-                                name="stockMinimo"
-                                required
                                 min="0"
                                 placeholder="Cantidad mínima"
-                                className="w-full border border-gray-400 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
+                                inputMode="decimal"
+                                className={claseCampo(!!errors.stockMinimo)}
+                                {...accesible("stockMinimo")}
+                                {...register("stockMinimo", { valueAsNumber: true })}
                             />
+                            <MensajeError id="error-stockMinimo" mensaje={errors.stockMinimo?.message} />
                         </div>
                     </div>
 
