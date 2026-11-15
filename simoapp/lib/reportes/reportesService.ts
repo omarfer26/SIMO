@@ -22,6 +22,8 @@
 // instantáneos). Cuando haya muchos reportes, se mandan desde/hasta/formato.
 
 import { isAxiosError } from "axios";
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
 import apiClient from "@/lib/apiClient";
 import {
   EXTENSION_FORMATO,
@@ -210,30 +212,166 @@ function guardarArchivo(blob: Blob, nombreArchivo: string) {
   URL.revokeObjectURL(url);
 }
 
+// Genera un archivo real y limpio descargable (.xlsx o .pdf) en modo cliente/mock
+function descargarArchivoMock(reporte: Reporte, formato: FormatoReporte) {
+  const nombreBase = reporte.nombreArchivo.replace(/\.[^/.]+$/, "");
+
+  if (formato === "EXCEL") {
+    // Generar libro de trabajo real en Excel (.xlsx) con autoajuste de celdas
+    const datosExcel = [
+      ["SISTEMA SIMO — REPORTE EMPRESARIAL"],
+      ["Reporte:", reporte.nombre],
+      ["Categoría:", reporte.categoria],
+      ["Período:", reporte.periodo],
+      ["Fecha de emisión:", reporte.fechaGeneracion.toLocaleString("es-CO")],
+      ["Descripción:", reporte.descripcion],
+      [], // fila en blanco separadora
+      ["CÓDIGO", "CONCEPTO / INDICADOR", "PARÁMETRO", "VALOR REGISTRADO", "ESTADO OPERACIONAL"],
+      ["SIMO-001", "Totalizado de Operaciones Consolidadas", "Corte del período", "$ 12.850.000", "CONFORME"],
+      ["SIMO-002", "Movimientos de Existencias y Kardex", "Auditoría interna", "148 registros", "VERIFICADO"],
+      ["SIMO-003", "Nivel de Disponibilidad de Mercancía", "Bodega / Almacén", "98.5%", "ÓPTIMO"],
+      ["SIMO-004", "Cumplimiento de Entregas y Pedidos", "Despachos clientes", "94.2%", "EN META"],
+    ];
+
+    const hoja = XLSX.utils.aoa_to_sheet(datosExcel);
+
+    // Auto-ajustar ancho de columnas para que cuadren perfectamente con el contenido
+    const anchos = datosExcel.reduce<number[]>((acc, fila) => {
+      fila.forEach((celda, i) => {
+        const longitud = String(celda ?? "").length;
+        acc[i] = Math.max(acc[i] || 10, longitud + 3);
+      });
+      return acc;
+    }, []);
+
+    hoja["!cols"] = anchos.map((ancho) => ({ wch: ancho }));
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Reporte");
+
+    const buffer = XLSX.write(libro, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    guardarArchivo(blob, `${nombreBase}.xlsx`);
+  } else if (formato === "PDF") {
+    // Generar y descargar documento PDF real limpio usando jsPDF
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    // Encabezado corporativo
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.rect(0, 0, 210, 24, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(255, 255, 255);
+    doc.text("SISTEMA SIMO — GESTIÓN EMPRESARIAL", 14, 15);
+
+    // Título y metadatos
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(14);
+    doc.text(reporte.nombre, 14, 36);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Categoría: ${reporte.categoria}`, 14, 44);
+    doc.text(`Período cubierto: ${reporte.periodo}`, 14, 50);
+    doc.text(`Fecha de emisión: ${reporte.fechaGeneracion.toLocaleString("es-CO")}`, 14, 56);
+    doc.text(`Descripción: ${reporte.descripcion}`, 14, 62);
+
+    // Línea divisoria
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.5);
+    doc.line(14, 68, 196, 68);
+
+    // Cabecera de la tabla
+    doc.setFillColor(241, 245, 249);
+    doc.rect(14, 73, 182, 9, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(51, 65, 85);
+    doc.text("CÓDIGO", 18, 79);
+    doc.text("CONCEPTO / INDICADOR", 50, 79);
+    doc.text("VALOR", 130, 79);
+    doc.text("ESTADO", 165, 79);
+
+    // Filas de datos
+    const filas = [
+      ["SIMO-001", "Totalizado de Operaciones Consolidadas", "$ 12.850.000", "Conforme"],
+      ["SIMO-002", "Movimientos de Existencias y Kardex", "148 registros", "Verificado"],
+      ["SIMO-003", "Nivel de Disponibilidad de Mercancía", "98.5%", "Óptimo"],
+      ["SIMO-004", "Cumplimiento de Entregas y Pedidos", "94.2%", "En meta"],
+    ];
+
+    doc.setFont("helvetica", "normal");
+    let y = 89;
+    filas.forEach(([cod, concepto, val, estado]) => {
+      doc.text(cod, 18, y);
+      doc.text(concepto, 50, y);
+      doc.text(val, 130, y);
+      doc.text(estado, 165, y);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, y + 3, 196, y + 3);
+      y += 9;
+    });
+
+    // Pie de página
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text("Reporte emitido automáticamente por el Sistema Integrado de Manejo de Operaciones (SIMO).", 14, 285);
+
+    // Descarga limpia y directa del PDF
+    doc.save(`${nombreBase}.pdf`);
+  } else {
+    // Formato genérico
+    const blob = new Blob([`Reporte: ${reporte.nombre}\nGenerado: ${new Date().toISOString()}`], {
+      type: "text/plain;charset=utf-8",
+    });
+    guardarArchivo(blob, `${nombreBase}.${EXTENSION_FORMATO[formato]}`);
+  }
+}
+
 /**
- * Baja el archivo de un reporte. En el mock no hay backend del que traer bytes,
- * así que se simula la generación con una demora y NO se guarda un archivo (un
- * .xlsx/.pdf/.docx de mentira no abriría); la consola avisa con un Toast. Al
- * poner NEXT_PUBLIC_REPORTES_MOCK=false se pide el blob real y se guarda.
+ * Baja el archivo de un reporte en el formato indicado (PDF o EXCEL). En el mock
+ * genera un archivo real en el navegador (CSV para Excel o ventana imprimible limpia para PDF)
+ * para que el usuario pueda visualizar y guardar su reporte.
+ * Al poner NEXT_PUBLIC_REPORTES_MOCK=false se pide el blob real al backend y se guarda.
  */
-export async function descargarReporte(reporte: Reporte): Promise<void> {
+export async function descargarReporte(
+  reporte: Reporte,
+  formatoDestino: FormatoReporte = reporte.formato,
+): Promise<void> {
   if (USAR_MOCK) {
-    await new Promise((resolver) => setTimeout(resolver, 700));
+    await new Promise((resolver) => setTimeout(resolver, 500));
+    descargarArchivoMock(reporte, formatoDestino);
     return;
   }
 
   const respuesta = await apiClient.get(`/reports/${reporte.id}/download`, {
+    params: { formato: formatoDestino },
     responseType: "blob",
   });
   const blob =
     respuesta.data instanceof Blob
       ? respuesta.data
       : new Blob([respuesta.data as BlobPart], {
-          type: MIME_FORMATO[reporte.formato],
+          type: MIME_FORMATO[formatoDestino],
         });
-  const nombre =
-    reporte.nombreArchivo ||
-    `reporte-${reporte.id}.${EXTENSION_FORMATO[reporte.formato]}`;
+
+  // Reemplazar la extensión por el formato elegido si difiere del original
+  const extensionActual = EXTENSION_FORMATO[reporte.formato];
+  const extensionNueva = EXTENSION_FORMATO[formatoDestino];
+  const nombreBase = reporte.nombreArchivo.endsWith(`.${extensionActual}`)
+    ? reporte.nombreArchivo.slice(0, -(extensionActual.length + 1))
+    : reporte.nombreArchivo.replace(/\.[^/.]+$/, "");
+
+  const nombre = `${nombreBase || `reporte-${reporte.id}`}.${extensionNueva}`;
   guardarArchivo(blob, nombre);
 }
 

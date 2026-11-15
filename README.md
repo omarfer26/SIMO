@@ -265,7 +265,7 @@ Responde `201`:
 
 ### 📝 Pedidos de clientes (SCRUM-81 / HU-10)
 
-> Protegido con JWT. Registran `VENDEDOR` / `GERENTE` / `ADMIN`; consulta también `INVENTARIO`.
+> Protegido con JWT. Opera el `VENDEDOR`; el `INVENTARIO` alista y consulta; `GERENTE` y `ADMIN` son de solo lectura (matriz EP-04).
 
 `POST /api/orders` registra el pedido en estado `REGISTRADO`:
 
@@ -288,7 +288,7 @@ Consulta:
 
 #### Cambio de estado (SCRUM-61)
 
-`PATCH /api/orders/:id/status` (alias `/estado`), roles `VENDEDOR` / `INVENTARIO` / `GERENTE` / `ADMIN`:
+`PATCH /api/orders/:id/status` (alias `/estado`), roles `VENDEDOR` (ciclo completo) e `INVENTARIO` (solo `EN_PREPARACION` y `LISTO`):
 
 ```json
 { "estado": "EN_PREPARACION" }
@@ -299,12 +299,12 @@ Consulta:
 - Al pasar a `EN_PREPARACION` se **descuenta el stock** de cada línea: primero del Almacén y luego de Bodega (RN-02), con movimientos `SALIDA_PEDIDO` en el Kardex. Si a una línea no le alcanza, no se descuenta nada y el pedido no avanza.
 - Al cancelar un pedido que ya descontó, cada cantidad vuelve a su ubicación (`REVERSO_PEDIDO`) y la cancelación queda en `log_auditoria`.
 - Responde `200` con `{ message, id_pedido, estado, pedido }` (el frontend lee `estado`).
-- Errores: `400` estado inválido o cancelación sin motivo, `404` pedido inexistente, `409` transición fuera del ciclo o stock insuficiente.
+- Errores: `400` estado inválido o cancelación sin motivo, `403` el rol no puede llevar el pedido a ese estado, `404` pedido inexistente, `409` transición fuera del ciclo o stock insuficiente.
 - Todo ocurre en la función `fn_cambiar_estado_pedido` (migración 016), en una sola transacción.
 
 #### Cancelación de pedidos (SCRUM-100 / HU-11 / CU-13)
 
-`POST /api/orders/:id/cancel` (alias `/cancelar`), roles `VENDEDOR` / `GERENTE` / `ADMIN`, para el modal "Cancelar pedido":
+`POST /api/orders/:id/cancel` (alias `/cancelar`), rol `VENDEDOR`, para el modal "Cancelar pedido":
 
 ```json
 { "causa": "El cliente ya no lo necesita" }
@@ -318,7 +318,7 @@ Consulta:
 
 #### Pedido entregado a venta (SCRUM-62 / HU-12)
 
-`POST /api/orders/:id/convert-to-sale` (alias `/convertir-venta`), roles `VENDEDOR` / `GERENTE` / `ADMIN`:
+`POST /api/orders/:id/convert-to-sale` (alias `/convertir-venta`), rol `VENDEDOR`:
 
 ```json
 { "metodo_pago": "NEQUI", "descuento": 1000 }

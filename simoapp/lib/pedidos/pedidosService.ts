@@ -25,7 +25,8 @@
 // para que un pedido creado en el mock aparezca en la lista del mock (y uno
 // creado en la API, en la lista de la API).
 // CONTRATO (el que ya implementó Ramón en la rama back-end, SCRUM-81):
-//   POST /api/orders   (roles VENDEDOR, GERENTE y ADMIN)
+//   POST /api/orders   (solo rol VENDEDOR: en Pedidos el Gerente y el
+//                       Administrador son de solo lectura, matriz EP-04)
 //   Recibe: { id_cliente, fecha_entrega_pactada: "AAAA-MM-DD",
 //             direccion_entrega?, observaciones?,
 //             lineas: [{ id_producto, cantidad }] }
@@ -41,7 +42,7 @@
 // SCRUM-59 (Camilo) — Se agregó convertirPedidoEnVenta(): convierte un pedido
 // ENTREGADO en venta (HU-12). Mismo interruptor NEXT_PUBLIC_PEDIDOS_MOCK.
 // CONTRATO (el que ya implementó Ramón en la rama back-end, SCRUM-62):
-//   POST /api/orders/:id/convert-to-sale   (roles VENDEDOR, GERENTE y ADMIN)
+//   POST /api/orders/:id/convert-to-sale   (solo rol VENDEDOR)
 //   Recibe: { metodo_pago: "EFECTIVO" | "NEQUI" | ..., descuento? }
 //     - la venta toma el cliente, las líneas y los precios del pedido; quien
 //       la registra sale del token. No mueve stock: ya salió al pasar el

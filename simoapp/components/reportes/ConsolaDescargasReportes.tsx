@@ -27,6 +27,7 @@ import {
   filtrarReportes,
   hayFiltrosActivos,
   type FiltrosReportes,
+  type FormatoReporte,
   type Reporte,
 } from "@/lib/reportes/tipos";
 import {
@@ -117,15 +118,15 @@ export default function ConsolaDescargasReportes() {
   // Luego formato, categoría y texto (función pura de lib/reportes).
   const visibles = useMemo(() => filtrarReportes(porFecha, filtros), [porFecha, filtros]);
 
-  async function manejarDescarga(reporte: Reporte) {
+  async function manejarDescarga(reporte: Reporte, formato: FormatoReporte) {
     setIdDescargando(reporte.id);
     try {
-      await descargarReporte(reporte);
+      await descargarReporte(reporte, formato);
       notificar({
         variante: "exito",
         titulo: "Descarga lista",
         origen: "sistema",
-        detalle: `${reporte.nombre} · ${NOMBRES_FORMATO[reporte.formato]}`,
+        detalle: `${reporte.nombre} · ${NOMBRES_FORMATO[formato]}`,
       });
     } catch (error) {
       notificar({

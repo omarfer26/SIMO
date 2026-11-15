@@ -18,6 +18,9 @@ import type { RangoFechas } from "@/components/pedidos/FiltroFechasPedidos";
 /** Tipos de documento que se pueden descargar. */
 export type FormatoReporte = "EXCEL" | "PDF" | "WORD";
 
+/** Formatos disponibles para exportación rápida en cada reporte. */
+export const FORMATOS_EXPORTACION: FormatoReporte[] = ["PDF", "EXCEL"];
+
 /** Nombre legible de cada formato (etiquetas y opciones). */
 export const NOMBRES_FORMATO: Record<FormatoReporte, string> = {
   EXCEL: "Excel",

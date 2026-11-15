@@ -56,3 +56,7 @@ deploy/backups/
 # repositorio. Los 156 archivos que ya estaban commiteados se sacaron del
 # índice con `git rm -r --cached .qoder` (siguen en el disco).
 .qoder/
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
