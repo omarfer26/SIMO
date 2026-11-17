@@ -25,6 +25,7 @@ import { isAxiosError } from "axios";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import apiClient from "@/lib/apiClient";
+import { empresaMock } from "@/components/shell/datos.mock";
 import {
   EXTENSION_FORMATO,
   MIME_FORMATO,
@@ -255,51 +256,61 @@ function descargarArchivoMock(reporte: Reporte, formato: FormatoReporte) {
     });
     guardarArchivo(blob, `${nombreBase}.xlsx`);
   } else if (formato === "PDF") {
-    // Generar y descargar documento PDF real limpio usando jsPDF
+    // Generar y descargar documento PDF real limpio usando jsPDF con los datos de empresa (Razón Social y NIT)
     const doc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
       format: "a4",
     });
 
-    // Encabezado corporativo
+    // Banda superior institucional
     doc.setFillColor(15, 23, 42); // slate-900
-    doc.rect(0, 0, 210, 24, "F");
+    doc.rect(0, 0, 210, 20, "F");
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
+    doc.setFontSize(13);
     doc.setTextColor(255, 255, 255);
-    doc.text("SISTEMA SIMO — GESTIÓN EMPRESARIAL", 14, 15);
+    doc.text("SISTEMA SIMO — GESTIÓN EMPRESARIAL", 14, 13);
 
-    // Título y metadatos
+    // Encabezado con datos estampados de la empresa (Razón Social, NIT y Datos de contacto)
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(14);
-    doc.text(reporte.nombre, 14, 36);
+    doc.setFont("helvetica", "bold");
+    doc.text(empresaMock.razonSocial, 14, 30);
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);
-    doc.text(`Categoría: ${reporte.categoria}`, 14, 44);
-    doc.text(`Período cubierto: ${reporte.periodo}`, 14, 50);
-    doc.text(`Fecha de emisión: ${reporte.fechaGeneracion.toLocaleString("es-CO")}`, 14, 56);
-    doc.text(`Descripción: ${reporte.descripcion}`, 14, 62);
+    doc.text(`NIT: ${empresaMock.nit}   |   Teléfono: ${empresaMock.telefono}   |   ${empresaMock.direccion}`, 14, 36);
 
-    // Línea divisoria
+    // Línea divisoria de cabecera
     doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(0.5);
-    doc.line(14, 68, 196, 68);
+    doc.line(14, 40, 196, 40);
+
+    // Título del reporte y metadatos
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text(reporte.nombre, 14, 48);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Categoría: ${reporte.categoria}    |    Período: ${reporte.periodo}    |    Emisión: ${reporte.fechaGeneracion.toLocaleString("es-CO")}`, 14, 54);
+    doc.text(`Descripción: ${reporte.descripcion}`, 14, 60);
 
     // Cabecera de la tabla
     doc.setFillColor(241, 245, 249);
-    doc.rect(14, 73, 182, 9, "F");
+    doc.rect(14, 66, 182, 8, "F");
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
-    doc.text("CÓDIGO", 18, 79);
-    doc.text("CONCEPTO / INDICADOR", 50, 79);
-    doc.text("VALOR", 130, 79);
-    doc.text("ESTADO", 165, 79);
+    doc.text("CÓDIGO", 18, 71.5);
+    doc.text("CONCEPTO / INDICADOR", 50, 71.5);
+    doc.text("VALOR", 130, 71.5);
+    doc.text("ESTADO", 165, 71.5);
 
     // Filas de datos
     const filas = [
@@ -310,21 +321,21 @@ function descargarArchivoMock(reporte: Reporte, formato: FormatoReporte) {
     ];
 
     doc.setFont("helvetica", "normal");
-    let y = 89;
+    let y = 80;
     filas.forEach(([cod, concepto, val, estado]) => {
       doc.text(cod, 18, y);
       doc.text(concepto, 50, y);
       doc.text(val, 130, y);
       doc.text(estado, 165, y);
       doc.setDrawColor(226, 232, 240);
-      doc.line(14, y + 3, 196, y + 3);
-      y += 9;
+      doc.line(14, y + 2.5, 196, y + 2.5);
+      y += 8;
     });
 
-    // Pie de página
+    // Pie de página oficial
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    doc.text("Reporte emitido automáticamente por el Sistema Integrado de Manejo de Operaciones (SIMO).", 14, 285);
+    doc.text(`Reporte emitido por ${empresaMock.razonSocial} (NIT: ${empresaMock.nit}) mediante SIMO.`, 14, 285);
 
     // Descarga limpia y directa del PDF
     doc.save(`${nombreBase}.pdf`);

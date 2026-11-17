@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import FormularioEmpresa from "@/components/admin/FormularioEmpresa";
+import PrevisualizacionEncabezadoPdf from "@/components/admin/PrevisualizacionEncabezadoPdf";
 import { empresaMock } from "@/components/shell/datos.mock";
 import type { Empresa } from "@/components/shell/tipos";
 
@@ -99,6 +100,9 @@ export default function AdminPage() {
           </dd>
         </div>
       </dl>
+
+      {/* Previsualización en vivo de cómo se estampará el encabezado en PDF */}
+      <PrevisualizacionEncabezadoPdf empresa={empresa} />
 
       {modalAbierto && (
         <FormularioEmpresa

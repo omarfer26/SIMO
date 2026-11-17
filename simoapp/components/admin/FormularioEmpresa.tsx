@@ -15,6 +15,7 @@ import type { Empresa } from "@/components/shell/tipos";
 import Button from "@/components/ui/Button";
 import InputText from "@/components/ui/InputText";
 import FileUpload from "./FileUpload";
+import PrevisualizacionEncabezadoPdf from "./PrevisualizacionEncabezadoPdf";
 
 interface FormularioEmpresaProps {
   empresa: Empresa;
@@ -93,11 +94,16 @@ export default function FormularioEmpresa({
         aria-hidden="true"
       />
 
-      <div className="relative z-10 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            Editar datos de la empresa
-          </h2>
+      <div className="relative z-10 w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
+        <div className="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              Editar datos de la empresa
+            </h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Modifica la información y previsualiza en tiempo real el encabezado de los reportes PDF.
+            </p>
+          </div>
           <button
             type="button"
             onClick={onCerrar}
@@ -116,64 +122,75 @@ export default function FormularioEmpresa({
           </button>
         </div>
 
-        {/* noValidate: la validación la hace manejarSubmit y los errores se
-            muestran con el estilo de InputText. Sin esto, el `required` de
-            los campos haría que el navegador mostrara su propio globito de
-            error antes de llegar a manejarSubmit. */}
+        {/* noValidate: la validación la hace manejarSubmit */}
         <form
           onSubmit={manejarSubmit}
           noValidate
-          className="mt-4 space-y-4"
+          className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-12"
         >
-          <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Logo
-            </label>
-            <FileUpload
-              archivo={archivoLogo}
-              valorActual={logoActual}
-              onArchivoSeleccionado={setArchivoLogo}
-              onQuitar={() => {
-                setArchivoLogo(null);
-                setLogoActual(null);
+          {/* Columna izquierda: Formulario de edición */}
+          <div className="space-y-4 lg:col-span-6">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Logo corporativo
+              </label>
+              <FileUpload
+                archivo={archivoLogo}
+                valorActual={logoActual}
+                onArchivoSeleccionado={setArchivoLogo}
+                onQuitar={() => {
+                  setArchivoLogo(null);
+                  setLogoActual(null);
+                }}
+              />
+            </div>
+
+            <InputText
+              id="razonSocial"
+              label="Razón Social"
+              required
+              value={valores.razonSocial}
+              error={errores.razonSocial}
+              onChange={(e) => actualizarCampo("razonSocial", e.target.value)}
+            />
+            <InputText
+              id="nit"
+              label="NIT"
+              required
+              value={valores.nit}
+              error={errores.nit}
+              onChange={(e) => actualizarCampo("nit", e.target.value)}
+            />
+            <InputText
+              id="telefono"
+              label="Teléfono"
+              required
+              value={valores.telefono}
+              error={errores.telefono}
+              onChange={(e) => actualizarCampo("telefono", e.target.value)}
+            />
+            <InputText
+              id="direccion"
+              label="Dirección"
+              required
+              value={valores.direccion}
+              error={errores.direccion}
+              onChange={(e) => actualizarCampo("direccion", e.target.value)}
+            />
+          </div>
+
+          {/* Columna derecha: Previsualización en vivo */}
+          <div className="lg:col-span-6">
+            <PrevisualizacionEncabezadoPdf
+              compacto
+              empresa={{
+                ...valores,
+                logoUrl: archivoLogo ? URL.createObjectURL(archivoLogo) : logoActual,
               }}
             />
           </div>
 
-          <InputText
-            id="razonSocial"
-            label="Razón Social"
-            required
-            value={valores.razonSocial}
-            error={errores.razonSocial}
-            onChange={(e) => actualizarCampo("razonSocial", e.target.value)}
-          />
-          <InputText
-            id="nit"
-            label="NIT"
-            required
-            value={valores.nit}
-            error={errores.nit}
-            onChange={(e) => actualizarCampo("nit", e.target.value)}
-          />
-          <InputText
-            id="telefono"
-            label="Teléfono"
-            required
-            value={valores.telefono}
-            error={errores.telefono}
-            onChange={(e) => actualizarCampo("telefono", e.target.value)}
-          />
-          <InputText
-            id="direccion"
-            label="Dirección"
-            required
-            value={valores.direccion}
-            error={errores.direccion}
-            onChange={(e) => actualizarCampo("direccion", e.target.value)}
-          />
-
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800 lg:col-span-12">
             <Button variant="secondary" onClick={onCerrar}>
               Cancelar
             </Button>
