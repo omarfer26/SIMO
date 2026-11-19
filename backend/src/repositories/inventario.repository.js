@@ -155,8 +155,41 @@ async function registrarTraslado({ idProducto, cantidad, idUsuario, idResponsabl
     return rows[0];
 }
 
+// SCRUM-169: auditoría completa del Kardex (migración 025). Saldos de cada
+// producto contra su stock y cada movimiento contra el documento que lo originó.
+const MAXIMO_OBSERVACIONES = 500;
+
+async function auditarKardex() {
+    const [productos, documentos] = await Promise.all([
+        pool.query(
+            `SELECT p.id_producto, p.sku, p.nombre, v.movimientos, v.movimientos_inconsistentes,
+                    v.saldo_bodega_kardex, v.saldo_almacen_kardex, v.stock_bodega, v.stock_almacen, v.consistente
+             FROM fn_validar_kardex() v JOIN productos p ON p.id_producto = v.id_producto`
+        ),
+        pool.query(
+            `SELECT a.documento, a.id_documento, a.id_producto, p.sku, a.ubicacion, a.problema, a.esperado, a.registrado
+             FROM fn_auditar_documentos_kardex() a LEFT JOIN productos p ON p.id_producto = a.id_producto`
+        ),
+    ]);
+    const inconsistentes = productos.rows.filter((p) => !p.consistente);
+    const documentosMal = new Set(documentos.rows.map((d) => `${d.documento}-${d.id_documento}`));
+    return {
+        resumen: {
+            consistente: inconsistentes.length === 0 && documentos.rows.length === 0,
+            productos_revisados: productos.rows.length,
+            movimientos_revisados: productos.rows.reduce((suma, p) => suma + Number(p.movimientos), 0),
+            productos_inconsistentes: inconsistentes.length,
+            documentos_inconsistentes: documentosMal.size,
+            observaciones: documentos.rows.length,
+        },
+        productos_inconsistentes: inconsistentes.slice(0, MAXIMO_OBSERVACIONES),
+        documentos: documentos.rows.slice(0, MAXIMO_OBSERVACIONES),
+    };
+}
+
 module.exports = {
     buscarProductoPorSku,
+    auditarKardex,
     registrarTraslado,
     obtenerKardex,
     resumenProductoKardex,

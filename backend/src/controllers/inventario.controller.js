@@ -11,6 +11,7 @@ const {
     obtenerKardex,
     resumenProductoKardex,
     registrarTraslado,
+    auditarKardex,
 } = require('../repositories/inventario.repository');
 const { aInstante } = require('../utils/fechas');
 const { aNumero, excedeDecimales, REGEX_ENTERO_POSITIVO } = require('../utils/numeros');
@@ -420,4 +421,20 @@ async function postTraslado(req, res) {
     }
 }
 
-module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste, getKardex, postTraslado };
+// =====================================================================
+// GET /api/inventory/kardex-audit (SCRUM-169)
+// Auditoría completa del Kardex: saldo de cada producto contra su stock y cada
+// movimiento contra su documento (venta, anulación, pedido, cancelación,
+// compra, ajuste). Responde { resumen, productos_inconsistentes, documentos };
+// las listas traen como máximo 500 observaciones.
+// =====================================================================
+async function getAuditoriaKardex(req, res) {
+    try {
+        return res.status(200).json(await auditarKardex());
+    } catch (error) {
+        console.error('[GET /api/inventory/kardex-audit] Error:', error);
+        return res.status(500).json({ error: 'Internal Server Error', message: 'Error interno al auditar el Kardex.' });
+    }
+}
+
+module.exports = { postIngresoBodega, postCompra, getCompra, postAjuste, getKardex, postTraslado, getAuditoriaKardex };

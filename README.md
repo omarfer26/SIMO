@@ -266,6 +266,8 @@ Responde `201`:
 - `saldo_coincide: false` marca un movimiento cuyo saldo guardado no cuadra; `producto.consistente` resume la auditoría del producto.
 - Errores: `400` id o fechas inválidas, `404` producto inexistente.
 
+`GET /api/inventory/kardex-audit` (roles `INVENTARIO` / `ADMIN` / `GERENTE`, SCRUM-169) audita todo el Kardex: el saldo de cada producto contra su stock y cada movimiento contra su documento (ventas, anulaciones, pedidos, cancelaciones, compras y ajustes). Responde `{ resumen: { consistente, productos_revisados, movimientos_revisados, productos_inconsistentes, documentos_inconsistentes, observaciones }, productos_inconsistentes: [...], documentos: [ { documento, id_documento, id_producto, sku, ubicacion, problema, esperado, registrado } ] }`, con un máximo de 500 observaciones por lista. La misma auditoría corre todas las noches a las 00:30 y deja una alerta en el registro del servidor si encuentra diferencias.
+
 ### 📝 Pedidos de clientes (SCRUM-81 / HU-10)
 
 > Protegido con JWT. Registran `VENDEDOR` / `GERENTE` / `ADMIN`; consulta también `INVENTARIO`.

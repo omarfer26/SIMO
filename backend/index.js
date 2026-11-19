@@ -7,6 +7,7 @@ const JWT = require('./src/config/jwt'); // clave y expiración compartidas con 
 const pool = require('./db');
 const errorHandler = require('./middleware/errorHandler');
 const iniciarAuditoriaPedidos = require('./cron/auditarPedidos'); // SCRUM-69
+const iniciarAuditoriaKardex = require('./cron/auditarKardex');   // SCRUM-169
 const { refrescarEnSegundoPlano: precalentarReportes } = require('./src/services/reportes.service');
 
 const rateLimit = require('express-rate-limit');
@@ -240,8 +241,10 @@ app.use((req, res, next) => {
 // 2. Middleware Global de Manejo de Errores (DEBE SER EL ÚLTIMO app.use)
 app.use(errorHandler);
 
-// Tarea programada de medianoche: pedidos vencidos (SCRUM-69)
+// Tareas programadas: pedidos vencidos a medianoche (SCRUM-69) y auditoría
+// del Kardex a las 00:30 (SCRUM-169)
 iniciarAuditoriaPedidos();
+iniciarAuditoriaKardex();
 
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);

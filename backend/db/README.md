@@ -29,7 +29,8 @@ db/
 │   ├── 021_traslados.sql       fn_registrar_traslado Bodega -> Almacén (HU-06)
 │   ├── 022_pagos_digitales.sql pagos_digitales y fn_conciliar_pago (SCRUM-78)
 │   ├── 023_auditoria_precios.sql trigger CAMBIO_PRECIO en log_auditoria (SCRUM-77)
-│   └── 024_indices_pedidos.sql índice de pedidos por fecha y auditoría de índices (SCRUM-168)
+│   ├── 024_indices_pedidos.sql índice de pedidos por fecha y auditoría de índices (SCRUM-168)
+│   └── 025_auditoria_kardex.sql fn_auditar_documentos_kardex y sp_auditar_kardex (SCRUM-169)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
@@ -46,7 +47,8 @@ db/
     ├── 007_estados_pedido.sql    17 pruebas del ciclo de estados con descuento y reverso de stock (no deja datos)
     ├── 008_pedido_a_venta.sql    13 pruebas de la conversión de pedido entregado en venta (no deja datos)
     ├── 009_cancelacion_pedidos.sql 11 pruebas de la cancelación según CU-13 (no deja datos)
-    └── 010_ventas_traslados_pagos.sql 47 pruebas de venta, anulación, traslados, pagos y precios (no deja datos)
+    ├── 010_ventas_traslados_pagos.sql 47 pruebas de venta, anulación, traslados, pagos y precios (no deja datos)
+    └── 011_auditoria_kardex.sql   15 pruebas de la auditoría completa del Kardex (no deja datos)
 ```
 
 ## Cómo crear la base
@@ -147,7 +149,36 @@ SELECT * FROM fn_kardex_producto(1, '2026-10-01', '2026-10-31');
 
 -- Auditoría: ¿el saldo del Kardex coincide con el stock de cada producto?
 SELECT * FROM fn_validar_kardex() WHERE NOT consistente;
+
+-- Auditoría de documentos (025): ¿cada movimiento corresponde a su documento?
+SELECT * FROM fn_auditar_documentos_kardex();
+
+-- Las dos juntas. Con p_estricto => true falla (SM033) si hay diferencias:
+-- es la verificación de la restauración de respaldos y de la integración continua.
+CALL sp_auditar_kardex();
+CALL sp_auditar_kardex(p_estricto => true);
 ```
+
+### Qué valida la auditoría de documentos (SCRUM-169)
+
+El saldo de un producto puede cuadrar consigo mismo y aun así estar mal: si una venta
+descontara 3 unidades cuando su línea dice 2, los saldos seguirían cuadrando. Por eso
+`fn_auditar_documentos_kardex()` compara cada movimiento con el documento que lo originó:
+
+| Documento | Regla |
+|---|---|
+| Venta POS | Las salidas por producto suman lo que dicen sus líneas |
+| Venta de un pedido | No tiene salidas propias (el pedido ya descontó: tenerlas sería descontar dos veces) |
+| Venta anulada / completada | Anulada: los reversos devuelven a cada ubicación lo que salió de ella. Completada: no tiene reversos |
+| Pedido | Si pasó por `EN_PREPARACION`, sus salidas suman sus líneas; si no, no tiene salidas y no puede estar en preparación, listo ni entregado |
+| Pedido cancelado / no cancelado | Cancelado: los reversos devuelven a cada ubicación lo que salió. Otro estado: sin reversos |
+| Compra | Confirmada: las entradas suman sus líneas. Borrador: sin entradas |
+| Ajuste manual | Tiene su registro `AJUSTE_INVENTARIO` en el log de auditoría |
+
+Cada observación trae documento, producto, ubicación, problema, cantidad esperada y
+registrada. Con 2.000 productos y 155.000 movimientos, la auditoría completa tarda 0,8 s.
+Se ejecuta todas las noches a las 00:30 (`cron/auditarKardex.js`) y se consulta en
+`GET /api/inventory/kardex-audit`.
 
 ## Población masiva para pruebas de carga (SCRUM-131)
 
