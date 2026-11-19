@@ -253,3 +253,46 @@ La API se conecta con `simo_app` (mínimo privilegio: no puede modificar el Kard
 auditoría). Las migraciones nuevas se aplican con el dueño de la base:
 `DATABASE_URL=<cadena directa del dueño> sh db/neon/aplicar.sh` y después se vuelve a
 correr `db/roles/001_rol_aplicacion.sql` para dar permisos a `simo_app` sobre lo nuevo.
+
+## Integración y despliegue continuos (SCRUM-172)
+
+`.github/workflows/ci.yml` corre en **cada Pull Request** y en cada push a `main`,
+`back-end` y `front-end`. Un PR solo se debe aprobar con todas las verificaciones en verde.
+
+| Trabajo | Qué comprueba |
+|---|---|
+| Base de datos y API | `backend/scripts/verificar_base.sh` sobre un PostgreSQL 18 limpio: migraciones y seed, **segunda aplicación** de las migraciones (deben poder re-ejecutarse), rol `simo_app`, 251 pruebas SQL, `sp_auditar_kardex` estricto, población masiva de 5.000 ventas y nueva auditoría. Luego las pruebas de integración (la API real conectada como `simo_app`) y Jest |
+| Frontend | `npm run build` de Next.js (incluye la revisión de tipos). ESLint se ejecuta pero **no bloquea** hasta que se corrijan los 3 errores existentes |
+| Despliegue a producción | Solo en push a `main` y si los dos anteriores pasaron. Ver abajo |
+
+La misma verificación de la base se corre en local con Docker (desde `backend/`, contra
+un PostgreSQL de pruebas; crea y borra las bases `simo_ci` y `simo_ci_carga`):
+
+```bash
+docker run --rm --network <red> -e PG_ADMIN_URL=postgres://postgres:CLAVE@<host>:5432 -e APP_PASSWORD=<clave> -v "$PWD:/b" -w /b postgres:18-alpine sh scripts/verificar_base.sh
+```
+
+### Despliegue automático
+
+Al llegar un cambio a `main`, el trabajo *Despliegue a producción* (entorno `produccion`
+de GitHub, nunca dos a la vez):
+
+1. Aplica las migraciones en Neon con `db/neon/aplicar.sh` y renueva los permisos de `simo_app`.
+2. Audita el inventario de producción con `sp_auditar_kardex` estricto: **si no cuadra, se detiene**.
+3. Pide a Render que despliegue la API (Deploy Hook).
+4. Espera a que `GET /api/health` informe el commit nuevo en `version` (Render lo publica en
+   `RENDER_GIT_COMMIT`) y falla si no ocurre en 15 minutos.
+
+Configuración (Settings > Secrets and variables > Actions; la hace quien administra el repositorio):
+
+| Nombre | Tipo | Valor |
+|---|---|---|
+| `NEON_MIGRACIONES_URL` | Secreto | Cadena **directa** (sin `-pooler`) del rol dueño de Neon |
+| `SIMO_APP_PASSWORD` | Secreto | Contraseña actual de `simo_app` (la misma de la `DATABASE_URL` de la API) |
+| `RENDER_DEPLOY_HOOK` | Secreto | Render > servicio de la API > Settings > Deploy Hook |
+| `API_URL` | Variable | URL pública de la API, p. ej. `https://simo-api.onrender.com` |
+
+Sin un secreto, el paso correspondiente se salta con un aviso en la ejecución (no falla).
+En Render, el despliegue automático por push se desactiva (`autoDeploy: false`) para que la
+API solo se despliegue después de pasar las pruebas. El frontend se publica con la
+integración de Git de su proveedor (Vercel).

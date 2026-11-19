@@ -5,6 +5,9 @@ services:
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
+    # Solo se despliega desde la integración continua, después de las pruebas (SCRUM-172)
+    autoDeploy: false
+    healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
         sync: false   # Se define manualmente en el dashboard de Render

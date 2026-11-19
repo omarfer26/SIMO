@@ -90,13 +90,17 @@ app.use('/api/company', empresaRoutes);
 // ENDPOINTS PRINCIPALES
 // =====================================================================
 
-// Estado del servicio (Healthcheck)
+// Estado del servicio (Healthcheck). "version" es el commit desplegado:
+// Render lo publica en RENDER_GIT_COMMIT y otros despliegues pueden definir
+// APP_VERSION. La integración continua lo usa para confirmar que la versión
+// nueva ya está en línea (SCRUM-172).
+const VERSION = (process.env.APP_VERSION || process.env.RENDER_GIT_COMMIT || '').slice(0, 40) || null;
 app.get('/api/health', async (req, res) => {
     try {
         await pool.query('SELECT 1');
-        res.json({ status: 'ok', database: 'ok' });
+        res.json({ status: 'ok', database: 'ok', version: VERSION });
     } catch (error) {
-        res.status(503).json({ status: 'error', database: 'unavailable' });
+        res.status(503).json({ status: 'error', database: 'unavailable', version: VERSION });
     }
 });
 

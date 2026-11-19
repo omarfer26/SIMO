@@ -1,0 +1,190 @@
+# SIMO - Integración y despliegue continuos (SCRUM-172)
+#
+# En cada Pull Request y en cada push a main, back-end o front-end:
+#   · Base de datos: migraciones (dos veces), rol de la API, 251 pruebas SQL,
+#     auditoría estricta del inventario y población masiva
+#     (backend/scripts/verificar_base.sh) sobre un PostgreSQL 18 limpio.
+#   · API: pruebas de integración (node:test, cada suite levanta la API real
+#     contra esa base conectada como simo_app) y pruebas unitarias (Jest).
+#   · Frontend: compilación de producción de Next.js (incluye la revisión de
+#     tipos de TypeScript) y ESLint (informativo mientras se corrigen los
+#     errores existentes).
+# Solo si todo pasa y el cambio llegó a main, se despliega a producción:
+#   1. Migraciones en Neon (si está el secreto NEON_MIGRACIONES_URL): son
+#      re-ejecutables y el paso 2 de la verificación lo comprueba en cada PR.
+#   2. Auditoría estricta del inventario en Neon: si no cuadra, NO se despliega.
+#   3. Despliegue de la API en Render (secreto RENDER_DEPLOY_HOOK).
+#   4. Espera a que la API nueva responda en /api/health (variable API_URL).
+# Configuración: deploy/README.md, sección "Integración y despliegue continuos".
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main, back-end, front-end]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Un push nuevo a la misma rama cancela la ejecución anterior (salvo despliegues)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  backend:
+    name: Base de datos y API
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: prueba-ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_PASSWORD: prueba-ci-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificación de la base de datos
+        # psql 18 desde la imagen oficial: no depende de la versión del runner
+        run: >
+          docker run --rm --network host
+          -e PG_ADMIN_URL=postgres://postgres:prueba-ci@localhost:5432
+          -e APP_PASSWORD -v "$PWD:/b" -w /b postgres:18-alpine
+          sh scripts/verificar_base.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: Pruebas de integración de la API
+        env:
+          DATABASE_URL: postgres://simo_app:${{ env.APP_PASSWORD }}@localhost:5432/simo_ci
+          DB_SSL: 'false'
+          RATE_LIMIT_MAX: '100000'
+          REPORTES_PRECALENTAR: 'false'
+          DOTENV_CONFIG_PATH: /nonexistent
+        run: npm run test:integracion
+
+      - name: Pruebas unitarias (Jest)
+        env:
+          DOTENV_CONFIG_PATH: /nonexistent
+        run: npx jest --ci
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: simoapp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: simoapp/package-lock.json
+
+      - name: Dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: ESLint (informativo)
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Compilación de producción
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build
+
+  despliegue:
+    name: Despliegue a producción
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: produccion
+    # Nunca dos despliegues a la vez; el segundo espera al primero
+    concurrency:
+      group: despliegue-produccion
+      cancel-in-progress: false
+    env:
+      NEON_MIGRACIONES_URL: ${{ secrets.NEON_MIGRACIONES_URL }}
+      SIMO_APP_PASSWORD: ${{ secrets.SIMO_APP_PASSWORD }}
+      RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Migraciones en Neon
+        working-directory: backend
+        run: |
+          if [ -z "$NEON_MIGRACIONES_URL" ]; then
+            echo "::warning title=Migraciones no aplicadas::Falta el secreto NEON_MIGRACIONES_URL; aplíquelas a mano con db/neon/aplicar.sh"
+            exit 0
+          fi
+          docker run --rm -e DATABASE_URL="$NEON_MIGRACIONES_URL" -v "$PWD:/b" -w /b postgres:18-alpine \
+            sh db/neon/aplicar.sh
+          if [ -n "$SIMO_APP_PASSWORD" ]; then
+            docker run --rm -e DATABASE_URL="$NEON_MIGRACIONES_URL" -e SIMO_APP_PASSWORD -v "$PWD:/b" -w /b postgres:18-alpine \
+              sh -c 'psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -v app_password="$SIMO_APP_PASSWORD" -f db/roles/001_rol_aplicacion.sql > /dev/null'
+            echo "Permisos de simo_app actualizados"
+          else
+            echo "::warning::Falta el secreto SIMO_APP_PASSWORD: no se actualizaron los permisos de simo_app"
+          fi
+
+      - name: Auditoría del inventario en producción
+        run: |
+          if [ -z "$NEON_MIGRACIONES_URL" ]; then exit 0; fi
+          docker run --rm -e DATABASE_URL="$NEON_MIGRACIONES_URL" postgres:18-alpine \
+            psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -c "CALL sp_auditar_kardex(NULL, NULL, NULL, NULL, true)" || {
+              echo "::error title=Despliegue detenido::El inventario de producción no cuadra (SM033). Revise GET /api/inventory/kardex-audit"
+              exit 1
+            }
+
+      - name: Despliegue de la API en Render
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::warning title=API no desplegada::Falta el secreto RENDER_DEPLOY_HOOK (Render > servicio > Settings > Deploy Hook)"
+            exit 0
+          fi
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK" > /dev/null
+          echo "Despliegue solicitado a Render para ${GITHUB_SHA::7}"
+
+      - name: Comprobación de la API desplegada
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ] || [ -z "$API_URL" ]; then
+            echo "Sin RENDER_DEPLOY_HOOK o sin la variable API_URL: no se comprueba"
+            exit 0
+          fi
+          # Render tarda unos minutos en construir; mientras tanto sigue respondiendo la
+          # versión anterior. /api/health informa el commit desplegado (RENDER_GIT_COMMIT):
+          # se espera a que sea este commit y a que la base responda.
+          for intento in $(seq 1 60); do
+            respuesta="$(curl -fsS --max-time 10 "${API_URL%/}/api/health" || true)"
+            case "$respuesta" in
+              *"\"version\":\"$GITHUB_SHA\""*)
+                echo "API en línea con ${GITHUB_SHA::7}: $respuesta"
+                echo "### Desplegado ${GITHUB_SHA::7} en producción" >> "$GITHUB_STEP_SUMMARY"
+                exit 0 ;;
+            esac
+            sleep 15
+          done
+          echo "::error title=Versión nueva sin respuesta::${API_URL%/}/api/health no informó ${GITHUB_SHA::7} en 15 minutos. Última respuesta: $respuesta"
+          exit 1

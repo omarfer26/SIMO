@@ -29,7 +29,7 @@ const login = (email, password) => peticion('/auth/login', { metodo: 'POST', cue
 
 async function preparar() {
     servidor = spawn(process.execPath, [path.join(__dirname, '..', '..', 'index.js')], {
-        env: { ...process.env, PORT: String(PORT) },
+        env: { ...process.env, PORT: String(PORT), APP_VERSION: 'prueba-ci' },
         stdio: ['ignore', 'pipe', 'inherit'],
     });
     await new Promise((resolve, reject) => {
@@ -43,6 +43,14 @@ async function limpiar() {
     await pool.end();
     servidor.kill();
 }
+
+// --------------------------------- Estado del servicio (SCRUM-172) ---------------------------------
+
+caso('GET /api/health responde sin sesión con la base y la versión desplegada', async () => {
+    const { status, body } = await peticion('/health');
+    assert.equal(status, 200);
+    assert.deepEqual(body, { status: 'ok', database: 'ok', version: 'prueba-ci' });
+});
 
 // --------------------------------- Login (SCRUM-16 / CU-01) ---------------------------------
 
