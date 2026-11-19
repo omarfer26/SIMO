@@ -1,10 +1,13 @@
 -- =====================================================================
--- SIMO - Población masiva de datos para pruebas de carga (SCRUM-131)
+-- SIMO - Población masiva de datos para pruebas de carga (SCRUM-131, SCRUM-170)
 --
 -- Genera productos, clientes y ventas simulados, COHERENTES con las reglas
--- del sistema: el stock inicial entra por compra a Bodega, se traslada al
--- Almacén y cada línea de venta genera su salida en el Kardex con el saldo
--- correcto. Al terminar, fn_validar_kardex() debe reportar todo consistente.
+-- del sistema: el stock inicial entra por una compra confirmada a Bodega, se
+-- traslada al Almacén y cada línea de venta genera su salida en el Kardex con
+-- el saldo correcto. Luego anula el 2 % de las ventas y concilia los pagos
+-- digitales con las funciones reales del sistema. Al terminar verifica el
+-- Kardex con las dos auditorías (saldos y documentos); si algo no cuadra,
+-- revierte toda la carga.
 --
 -- Uso (base local o de pruebas, con las migraciones y el seed aplicados):
 --   psql -d simo_retail -v productos=2000 -v clientes=5000 -v ventas=20000 \
@@ -43,13 +46,15 @@ END
 $$;
 
 -- Datos reproducibles: misma semilla, mismos datos en cada ejecución
-SELECT setseed(0.42);
+SELECT setseed(0.42) \g /dev/null
 
 CREATE TEMP TABLE parametros AS
 SELECT current_setting('simo.carga_productos')::INT AS n_productos,
        current_setting('simo.carga_clientes')::INT  AS n_clientes,
        current_setting('simo.carga_ventas')::INT    AS n_ventas,
        (SELECT id_usuario FROM usuarios u JOIN roles r USING (id_rol) WHERE r.codigo = 'INVENTARIO' ORDER BY id_usuario LIMIT 1) AS u_inventario,
+       (SELECT id_usuario FROM usuarios u JOIN roles r USING (id_rol) WHERE r.codigo IN ('GERENTE', 'ADMIN') AND u.estado ORDER BY r.codigo DESC, id_usuario LIMIT 1) AS u_gerente,
+       (SELECT coalesce(max(id_venta), 0) FROM ventas) AS ultima_venta,
        (SELECT array_agg(id_usuario) FROM usuarios u JOIN roles r USING (id_rol) WHERE r.codigo IN ('VENDEDOR', 'ADMIN', 'GERENTE')) AS vendedores,
        (SELECT array_agg(id_metodo_pago) FROM metodos_pago WHERE estado) AS metodos,
        (SELECT array_agg(id_categoria) FROM categorias) AS categorias,
@@ -94,12 +99,36 @@ SELECT pc.n, pc.id_producto, pc.precio_compra,
        (ceil(par.n_ventas * 8.0 / par.n_productos) * (1 + random()) + 20)::INT AS entrada
 FROM prod_carga pc, parametros par;
 
+-- La entrada es una compra real a proveedor (SCRUM-45): la compra con sus
+-- líneas y un movimiento ENTRADA_COMPRA por línea enlazado a ella, de modo
+-- que la auditoría de documentos (025) la verifica como cualquier otra.
+-- No se usa sp_confirmar_compra porque fecharía los movimientos hoy, después
+-- de las ventas simuladas; se hace lo mismo con la fecha de hace 366 días.
+CREATE TEMP TABLE compra_ini AS
+WITH c AS (
+    INSERT INTO compras (id_proveedor, documento_referencia, observacion, id_usuario, creado_en)
+    SELECT (SELECT min(id_proveedor) FROM proveedores WHERE estado), 'CARGA-COMPRA-INICIAL',
+           'Stock inicial generado para pruebas de carga (SCRUM-170)', par.u_inventario, now() - interval '366 days'
+    FROM parametros par
+    RETURNING id_compra, id_proveedor
+)
+SELECT * FROM c;
+
+INSERT INTO detalles_compras (id_compra, id_producto, cantidad, costo_unitario)
+SELECT ci.id_compra, s.id_producto, s.entrada, s.precio_compra
+FROM stock_ini s, compra_ini ci;
+
 INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_destino, cantidad, costo_unitario,
                                     saldo_bodega, saldo_almacen, id_usuario, id_proveedor,
-                                    documento_referencia, fecha_movimiento)
+                                    documento_referencia, motivo, id_compra, fecha_movimiento)
 SELECT s.id_producto, 'ENTRADA_COMPRA', 'BODEGA', s.entrada, s.precio_compra, s.entrada, 0, par.u_inventario,
-       (SELECT min(id_proveedor) FROM proveedores), 'CARGA-COMPRA-INICIAL', now() - interval '366 days'
-FROM stock_ini s, parametros par;
+       ci.id_proveedor, 'CARGA-COMPRA-INICIAL', 'Compra #' || ci.id_compra, ci.id_compra, now() - interval '366 days'
+FROM stock_ini s, parametros par, compra_ini ci;
+
+UPDATE compras c
+   SET estado = 'CONFIRMADA', confirmada_por = par.u_inventario, confirmada_en = now() - interval '366 days'
+  FROM compra_ini ci, parametros par
+ WHERE c.id_compra = ci.id_compra;
 
 INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, ubicacion_destino, cantidad,
                                     costo_unitario, saldo_bodega, saldo_almacen, id_usuario,
@@ -231,26 +260,86 @@ BEGIN
 END
 $$;
 
--- ------------------------------------------------------------- verificación
+-- ------------------------------------------------- anulaciones y conciliación
+-- Se hacen con las funciones reales del sistema, como lo haría la API:
+--   · 2 % de las ventas se anula con fn_anular_venta (CU-11): devuelve el
+--     stock a su ubicación, deja el reverso en el Kardex y la auditoría.
+--   · Los pagos digitales de las ventas no anuladas se concilian con
+--     fn_conciliar_pago (SCRUM-78): 85 % conciliados, 5 % rechazados y el
+--     resto queda pendiente, para que la consola de conciliación tenga datos.
+-- Los reversos quedan con la fecha de hoy, después de todas las ventas
+-- simuladas, así que el Kardex sigue en orden cronológico.
+CREATE TEMP TABLE ven_carga AS
+SELECT v.id_venta, random() AS azar
+FROM ventas v, parametros par
+WHERE v.id_venta > par.ultima_venta
+  AND EXISTS (SELECT 1 FROM detalles_ventas d JOIN prod_carga pc USING (id_producto) WHERE d.id_venta = v.id_venta);
+
 DO $$
-DECLARE r RECORD;
+DECLARE
+    par RECORD;
+    v   RECORD;
+BEGIN
+    SELECT * INTO par FROM parametros;
+    IF par.u_gerente IS NULL THEN
+        RAISE EXCEPTION 'Se necesita un usuario Gerente o Administrador activo (seed de desarrollo)';
+    END IF;
+    FOR v IN SELECT id_venta FROM ven_carga WHERE azar < 0.02 ORDER BY id_venta LOOP
+        PERFORM fn_anular_venta(v.id_venta, par.u_gerente, par.u_gerente,
+                                'Anulación simulada para pruebas de carga (SCRUM-170)');
+    END LOOP;
+    FOR v IN
+        SELECT pd.id_venta, random() AS r
+        FROM pagos_digitales pd JOIN ven_carga vc USING (id_venta) JOIN ventas ve USING (id_venta)
+        WHERE ve.estado = 'COMPLETADA' ORDER BY pd.id_venta
+    LOOP
+        IF v.r < 0.85 THEN
+            PERFORM fn_conciliar_pago(v.id_venta, 'CONCILIADO', par.u_gerente);
+        ELSIF v.r < 0.90 THEN
+            PERFORM fn_conciliar_pago(v.id_venta, 'RECHAZADO', par.u_gerente,
+                                      'Comprobante no coincide (simulado, SCRUM-170)');
+        END IF;
+    END LOOP;
+END
+$$;
+
+-- ------------------------------------------------------------- verificación
+-- Las dos auditorías del Kardex (SCRUM-132 y SCRUM-169), limitadas a los
+-- datos generados: si la base ya traía diferencias propias no se mezclan.
+-- Cualquier diferencia revierte toda la carga.
+DO $$
+DECLARE
+    r RECORD;
+    d INT;
 BEGIN
     SELECT count(*) FILTER (WHERE NOT consistente) AS malos, count(*) AS total
       INTO r FROM fn_validar_kardex() f JOIN prod_carga pc USING (id_producto);
     IF r.malos > 0 THEN
         RAISE EXCEPTION 'Kardex inconsistente en % de % productos de carga', r.malos, r.total;
     END IF;
-    RAISE NOTICE 'Kardex consistente en los % productos de carga', r.total;
+    SELECT count(*) INTO d
+      FROM fn_auditar_documentos_kardex() a
+     WHERE a.id_producto IN (SELECT id_producto FROM prod_carga)
+        OR (a.documento = 'VENTA'  AND a.id_documento IN (SELECT id_venta FROM ven_carga))
+        OR (a.documento = 'COMPRA' AND a.id_documento IN (SELECT id_compra FROM compra_ini));
+    IF d > 0 THEN
+        RAISE EXCEPTION 'La auditoría de documentos encontró % diferencias en los datos de carga', d;
+    END IF;
+    RAISE NOTICE 'Kardex consistente en los % productos de carga y en todos sus documentos', r.total;
 END
 $$;
 
 COMMIT;
 
-ANALYZE productos; ANALYZE clientes; ANALYZE ventas; ANALYZE detalles_ventas; ANALYZE movimientos_inventario;
+ANALYZE productos; ANALYZE clientes; ANALYZE compras; ANALYZE detalles_compras; ANALYZE ventas;
+ANALYZE detalles_ventas; ANALYZE movimientos_inventario; ANALYZE pagos_digitales; ANALYZE log_auditoria;
 
-SELECT (SELECT count(*) FROM productos WHERE sku LIKE 'CARGA-%')                         AS productos,
-       (SELECT count(*) FROM clientes WHERE identificacion LIKE '99%')                     AS clientes,
-       (SELECT count(*) FROM ventas v WHERE EXISTS (SELECT 1 FROM detalles_ventas d JOIN productos p USING (id_producto)
-                                                    WHERE d.id_venta = v.id_venta AND p.sku LIKE 'CARGA-%')) AS ventas,
-       (SELECT count(*) FROM detalles_ventas d JOIN productos p USING (id_producto) WHERE p.sku LIKE 'CARGA-%') AS lineas_venta,
-       (SELECT count(*) FROM movimientos_inventario WHERE documento_referencia LIKE 'CARGA-%') AS movimientos;
+\echo 'Registros generados:'
+SELECT (SELECT count(*) FROM prod_carga)                                                          AS productos,
+       (SELECT count(*) FROM cli_carga)                                                           AS clientes,
+       (SELECT count(*) FROM ven_carga)                                                           AS ventas,
+       (SELECT count(*) FROM ventas v JOIN ven_carga USING (id_venta) WHERE v.estado = 'ANULADA')  AS anuladas,
+       (SELECT count(*) FROM detalles_ventas JOIN ven_carga USING (id_venta))                     AS lineas_venta,
+       (SELECT count(*) FROM detalles_compras JOIN compra_ini USING (id_compra))                  AS lineas_compra,
+       (SELECT count(*) FROM pagos_digitales JOIN ven_carga USING (id_venta))                     AS pagos_digitales,
+       (SELECT count(*) FROM movimientos_inventario JOIN prod_carga USING (id_producto))          AS movimientos;

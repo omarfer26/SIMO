@@ -35,7 +35,7 @@ db/
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
-│   ├── poblar_masivo.sql         datos masivos coherentes para pruebas de carga (SCRUM-131)
+│   ├── poblar_masivo.sql         datos masivos coherentes para pruebas de carga (SCRUM-131, 170)
 │   ├── consultas_rendimiento.sql consultas de referencia con EXPLAIN ANALYZE (SCRUM-133)
 │   └── medir_api.sh              tiempos de respuesta de los endpoints (SCRUM-168)
 └── tests/
@@ -209,27 +209,46 @@ registrada. Con 2.000 productos y 155.000 movimientos, la auditoría completa ta
 Se ejecuta todas las noches a las 00:30 (`cron/auditarKardex.js`) y se consulta en
 `GET /api/inventory/kardex-audit`.
 
-## Población masiva para pruebas de carga (SCRUM-131)
+## Población masiva para pruebas de carga (SCRUM-131, SCRUM-170)
 
 `carga/poblar_masivo.sql` genera productos, clientes y ventas simuladas **respetando
-las reglas del sistema**: el stock entra por compra a Bodega, una parte se traslada al
-Almacén y cada línea de venta descuenta primero del Almacén y luego de Bodega
-(deducción en cascada, RN-02) con su movimiento `SALIDA_VENTA` y el saldo correcto.
-Las ventas se reparten en los últimos 12 meses (70 % con cliente, 10 % con descuento).
-Al final ejecuta `fn_validar_kardex()` y revierte todo si algún producto queda inconsistente.
+las reglas del sistema**, de modo que el resultado es indistinguible de una operación real:
+
+1. **Compra inicial confirmada** a un proveedor (`compras` + `detalles_compras`), con un
+   movimiento `ENTRADA_COMPRA` por línea enlazado a la compra (`id_compra`).
+2. **Traslado** de una parte del stock de Bodega al Almacén.
+3. **Ventas** repartidas en los últimos 12 meses (1 a 5 productos, 70 % con cliente, 10 %
+   con descuento). Cada línea descuenta primero del Almacén y luego de Bodega (RN-02) con
+   su `SALIDA_VENTA` y el saldo correcto; las ventas por Nequi, Daviplata o transferencia
+   llevan referencia y crean su pago digital pendiente (022).
+4. **Anulaciones** del 2 % de las ventas con `fn_anular_venta` (reverso en el Kardex y
+   registro en `log_auditoria`).
+5. **Conciliación** de los pagos digitales con `fn_conciliar_pago`: 85 % conciliados,
+   5 % rechazados, el resto pendiente.
+6. **Verificación**: `fn_validar_kardex()` (saldos) y `fn_auditar_documentos_kardex()`
+   (cada movimiento contra su compra o venta) limitadas a los datos generados. Si hay
+   cualquier diferencia, **se revierte toda la carga**.
 
 ```bash
 # sobre una base local con migraciones y seed aplicados
 psql -d simo_retail -v productos=2000 -v clientes=5000 -v ventas=50000 -f db/carga/poblar_masivo.sql
 ```
 
-| Parámetros | Productos | Clientes | Ventas | Líneas | Movimientos | Tiempo |
+Medido en Docker (PostgreSQL 18) sobre una base nueva con migraciones y seed:
+
+| Parámetros (productos / clientes / ventas) | Ventas | Anuladas | Líneas de venta | Pagos digitales | Movimientos | Tiempo |
 |---|---|---|---|---|---|---|
-| 1.000 / 2.000 / 10.000 | 1.000 | 2.000 | 10.000 | ~30.000 | ~32.600 | ~5 s |
-| 2.000 / 5.000 / 50.000 | 2.000 | 5.000 | 49.995 | ~150.300 | ~155.600 | ~26 s |
+| 50 / 100 / 1.000 | 1.000 | 20 | 2.981 | 513 | 3.178 | 0,7 s |
+| 1.000 / 2.000 / 10.000 (por defecto) | 9.999 | 207 | 29.762 | 5.076 | 32.957 | 6,5 s |
+| 2.000 / 5.000 / 50.000 | 49.995 | 1.004 | 150.326 | 24.981 | 158.530 | 28 s |
+
+Con la carga grande (≈ 360.000 registros) `CALL sp_auditar_kardex(p_estricto => true)`
+pasa sobre toda la base, las 141 pruebas de integración pasan contra ella y todos los
+endpoints de `carga/medir_api.sh` responden en 0,11 s o menos.
 
 - Los datos son reproducibles (`setseed`) y se reconocen por el SKU `CARGA-…`, documentos
-  de cliente `99…` y movimientos con documento `CARGA-…`.
+  de cliente `99…`, la compra y los movimientos con documento `CARGA-…` y el motivo de
+  anulación "Anulación simulada para pruebas de carga".
 - Como el Kardex es inalterable, estos datos **no se pueden borrar**: el script se niega a
   correr dos veces en la misma base y a correr en la base compartida de Neon (`neondb`)
   salvo que se pase `-v forzar=si`. Úselo en una base local o en una rama de Neon.
