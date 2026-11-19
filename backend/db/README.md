@@ -30,7 +30,8 @@ db/
 │   ├── 022_pagos_digitales.sql pagos_digitales y fn_conciliar_pago (SCRUM-78)
 │   ├── 023_auditoria_precios.sql trigger CAMBIO_PRECIO en log_auditoria (SCRUM-77)
 │   ├── 024_indices_pedidos.sql índice de pedidos por fecha y auditoría de índices (SCRUM-168)
-│   └── 025_auditoria_kardex.sql fn_auditar_documentos_kardex y sp_auditar_kardex (SCRUM-169)
+│   ├── 025_auditoria_kardex.sql fn_auditar_documentos_kardex y sp_auditar_kardex (SCRUM-169)
+│   └── 026_integridad_historial.sql ventas y líneas inalterables, API sin DELETE (SCRUM-174)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
@@ -48,7 +49,8 @@ db/
     ├── 008_pedido_a_venta.sql    13 pruebas de la conversión de pedido entregado en venta (no deja datos)
     ├── 009_cancelacion_pedidos.sql 11 pruebas de la cancelación según CU-13 (no deja datos)
     ├── 010_ventas_traslados_pagos.sql 47 pruebas de venta, anulación, traslados, pagos y precios (no deja datos)
-    └── 011_auditoria_kardex.sql   15 pruebas de la auditoría completa del Kardex (no deja datos)
+    ├── 011_auditoria_kardex.sql   15 pruebas de la auditoría completa del Kardex (no deja datos)
+    └── 012_integridad.sql         26 pruebas de llaves foráneas, protecciones y permisos (no deja datos)
 ```
 
 ## Cómo crear la base
@@ -122,6 +124,33 @@ erDiagram
 | Totales coherentes | `chk_ventas_total`, `chk_*_subtotal` |
 | Log de auditoría inalterable (RF-24) | triggers + `REVOKE` en `log_auditoria` |
 | Documento del cliente inalterable (CU-09 RB-1) | trigger `fn_documento_cliente_inalterable` (SQLSTATE `SM008`) |
+| Venta inalterable: solo se anula, una vez, y nunca se borra | trigger `fn_venta_inalterable` (SQLSTATE `SM034`, migración 026) |
+| Líneas de venta inalterables | trigger bloquea UPDATE/DELETE/TRUNCATE en `detalles_ventas` (026) |
+| Pago digital no se borra (soporte de la conciliación) | trigger en `pagos_digitales` (026) |
+| Nada con historial se borra | llaves `ON DELETE RESTRICT` + la API sin permiso `DELETE` (026) |
+
+### Integridad del historial (SCRUM-174)
+
+Las 34 llaves foráneas del esquema se auditaron y `tests/012_integridad.sql` lo verifica
+sobre el catálogo de PostgreSQL, así que falla si alguien cambia una después:
+
+- **Toda llave hacia `ventas`, `clientes`, `productos`, `usuarios`, `pedidos` y `compras` es
+  `ON DELETE RESTRICT`**: ninguno se puede borrar mientras tenga historial (PostgreSQL responde
+  `23001`). Sin historial sí se pueden borrar, para corregir un error de digitación.
+- Las únicas `CASCADE` son las líneas de compra y de pedido, y solo actúan sobre documentos que
+  no se pueden borrar: una compra confirmada tiene movimientos y todo pedido tiene historial.
+- Ninguna llave usa `SET NULL`: nunca se pierde a quién pertenece un registro.
+
+La revisión encontró tres huecos que cerró la migración 026:
+
+| Hueco | Riesgo | Corrección |
+|---|---|---|
+| Líneas de venta sin protección | Alterar una venta ya cobrada; borrar una venta que viene de un pedido quitando primero sus líneas | `detalles_ventas` inalterable, como el Kardex |
+| Ventas modificables | Cambiar el total o "desanular" una venta (pasaba los `CHECK` y dejaba el stock devuelto dos veces) | Solo se permite la anulación, una vez; `fn_registrar_venta` ahora inserta la venta ya completa |
+| Pagos digitales borrables | Perder el rastro de la conciliación | Los pagos no se borran |
+
+Además, el rol de la API (`simo_app`) ya no tiene permiso `DELETE` en ninguna tabla con
+historial: la API nunca borra, inactiva. Lo conserva solo en `usuarios` y `jwt_blacklist`.
 
 ## Convenciones para el backend
 

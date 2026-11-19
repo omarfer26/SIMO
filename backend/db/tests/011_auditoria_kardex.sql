@@ -82,8 +82,11 @@ SELECT pg_temp.verificar('Detecta una venta que descontó más de lo que dicen s
         = ARRAY['Las salidas del Kardex no coinciden con las líneas de la venta']
     AND (SELECT esperado = 6 AND registrado = 7 FROM fn_auditar_documentos_kardex() WHERE documento = 'VENTA' AND id_documento = (SELECT id_venta FROM v1)));
 
--- 2. Línea de venta modificada después de registrada (detalles_ventas no está protegida: ver SCRUM-174)
+-- 2. Línea de venta modificada después de registrada. Desde la 026 las líneas son
+--    inalterables: se desactiva su protección solo dentro de esta transacción.
+ALTER TABLE detalles_ventas DISABLE TRIGGER trg_detalles_ventas_inalterable;
 UPDATE detalles_ventas SET cantidad = 1, subtotal_linea = 120 WHERE id_venta = (SELECT id_venta FROM v2);
+ALTER TABLE detalles_ventas ENABLE TRIGGER trg_detalles_ventas_inalterable;
 SELECT pg_temp.verificar('Detecta una línea de venta alterada después de registrada (contra las salidas)',
     EXISTS (SELECT 1 FROM pg_temp.problemas('VENTA', (SELECT id_venta FROM v2)) p
             WHERE p = 'Las salidas del Kardex no coinciden con las líneas de la venta'));
