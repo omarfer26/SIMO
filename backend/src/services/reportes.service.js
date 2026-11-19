@@ -16,7 +16,16 @@ const MINUTOS_CACHE = 5;
 const DIAS = 30;                 // período de los reportes "por período"
 const MAXIMO_FILAS = 20000;      // tope por reporte, para no agotar la memoria
 
-const fechaHora = (v) => (v ? new Date(v).toLocaleString('es-CO', { timeZone: 'America/Bogota', hour12: false }) : '');
+// Formateadores creados una sola vez. toLocaleString con opciones crea uno
+// nuevo en cada llamada: con 12.500 fechas eran 570 ms de los 1,26 s que
+// tardaba el reporte de movimientos; reutilizado, 9 ms (SCRUM-168).
+const FORMATO_FECHA = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', hour12: false,
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
+});
+const FORMATO_DINERO = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const FORMATO_NUMERO = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 3 });
+const fechaHora = (v) => (v ? FORMATO_FECHA.format(new Date(v)) : '');
 const hoyColombia = () => new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10);
 
 // tipo de columna: texto (por defecto) | numero | dinero | fecha
@@ -344,8 +353,8 @@ async function aExcel(reporte, consulta, filas, empresa) {
 // -------------------------------------------------------------------- PDF
 const formatoPdf = (valor, columna) => {
     if (valor === '') return '';
-    if (columna.tipo === 'dinero') return `$${valor.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-    if (columna.tipo === 'numero') return valor.toLocaleString('es-CO', { maximumFractionDigits: 3 });
+    if (columna.tipo === 'dinero') return `$${FORMATO_DINERO.format(valor)}`;
+    if (columna.tipo === 'numero') return FORMATO_NUMERO.format(valor);
     return valor;
 };
 
@@ -431,19 +440,17 @@ function buscarReporte(id) {
     return CATALOGO.find((r) => r.id === Number(id)) || null;
 }
 
-async function generarReporte(reporte, { forzar = false } = {}) {
-    const guardado = cache.get(reporte.id);
-    if (!forzar && guardado && guardado.vence > Date.now()) return guardado;
+const enCurso = new Map(); // id -> promesa: dos pedidos simultáneos generan una sola vez
 
+async function construirArchivo(reporte) {
     const consulta = CONSULTAS[reporte.consulta];
     const [{ rows: filas }, empresa] = await Promise.all([pool.query(consulta.sql), datosEmpresa()]);
     const datos = reporte.formato === 'EXCEL'
         ? await aExcel(reporte, consulta, filas, empresa)
         : await aPdf(reporte, consulta, filas, empresa);
-    const generado = new Date();
     const archivo = {
         datos,
-        generado,
+        generado: new Date(),
         vence: Date.now() + MINUTOS_CACHE * 60e3,
         filas: filas.length,
         mime: MIME[reporte.formato],
@@ -453,21 +460,61 @@ async function generarReporte(reporte, { forzar = false } = {}) {
     return archivo;
 }
 
-// Catálogo con el tamaño y la fecha de cada archivo (contrato del frontend)
-async function listarReportes() {
-    const archivos = await Promise.all(CATALOGO.map((r) => generarReporte(r)));
-    return CATALOGO.map((r, i) => ({
-        id_reporte: r.id,
-        nombre: r.nombre,
-        descripcion: r.descripcion,
-        categoria: r.categoria,
-        formato: r.formato,
-        periodo: r.periodo,
-        fecha_generacion: archivos[i].generado,
-        tamano_bytes: archivos[i].datos.length,
-        nombre_archivo: archivos[i].nombreArchivo,
-        registros: archivos[i].filas,
-    }));
+// Archivo vigente del reporte: el de la caché si no ha vencido; si no, se genera
+// con los datos del momento (la descarga siempre trae datos de hace <= 5 minutos).
+async function generarReporte(reporte, { forzar = false } = {}) {
+    const guardado = cache.get(reporte.id);
+    if (!forzar && guardado && guardado.vence > Date.now()) return guardado;
+    if (!enCurso.has(reporte.id)) {
+        enCurso.set(reporte.id, construirArchivo(reporte).finally(() => enCurso.delete(reporte.id)));
+    }
+    return enCurso.get(reporte.id);
 }
 
-module.exports = { listarReportes, buscarReporte, generarReporte };
+// Genera en segundo plano, uno detrás de otro, los reportes que no estén en
+// caché o hayan vencido. Los errores solo se registran: la descarga vuelve a
+// intentarlo y responde el error si persiste.
+let refrescando = null;
+function refrescarEnSegundoPlano() {
+    if (refrescando) return refrescando;
+    refrescando = (async () => {
+        for (const reporte of CATALOGO) {
+            const guardado = cache.get(reporte.id);
+            if (guardado && guardado.vence > Date.now()) continue;
+            try {
+                await generarReporte(reporte);
+            } catch (error) {
+                console.error(`[Reportes] No se pudo generar "${reporte.nombre}":`, error.message);
+            }
+        }
+    })().finally(() => { refrescando = null; });
+    return refrescando;
+}
+
+// Catálogo de reportes (contrato de la consola del frontend). Responde al
+// instante: ya no genera los archivos (antes generaba los 9 en cada consulta:
+// 3,6 s con 50.000 ventas). Usa lo que haya en caché, aunque haya vencido, y
+// renueva en segundo plano. Un reporte que aún no se ha generado llega con
+// tamano_bytes = null (el frontend muestra "—") y la fecha actual, que es la
+// de los datos con los que se generará al descargarlo.
+function listarReportes() {
+    refrescarEnSegundoPlano();
+    const ahora = new Date();
+    return CATALOGO.map((r) => {
+        const archivo = cache.get(r.id);
+        return {
+            id_reporte: r.id,
+            nombre: r.nombre,
+            descripcion: r.descripcion,
+            categoria: r.categoria,
+            formato: r.formato,
+            periodo: r.periodo,
+            fecha_generacion: archivo ? archivo.generado : ahora,
+            tamano_bytes: archivo ? archivo.datos.length : null,
+            nombre_archivo: archivo ? archivo.nombreArchivo : `${r.clave}-${hoyColombia()}.${EXTENSION[r.formato]}`,
+            registros: archivo ? archivo.filas : null,
+        };
+    });
+}
+
+module.exports = { listarReportes, buscarReporte, generarReporte, refrescarEnSegundoPlano };

@@ -126,17 +126,22 @@ DECLARE
     bodega     NUMERIC[];
     almacen    NUMERIC[];
     clientes   INT[];
+    digitales  INT[];
     v_id_venta INT;
+    v_metodo   INT;
     v_lineas   INT;
     v_inicio   INT;
     v_salto    INT;
     k          INT;
     i          INT;
     v_cant     NUMERIC;
-    v_de_alm   NUMERIC;
-    v_de_bod   NUMERIC;
     v_subtotal NUMERIC;
     v_desc     NUMERIC;
+    -- Líneas de la venta en curso: producto (posición), cantidad, de Almacén, de Bodega
+    l_pos      INT[];
+    l_cant     NUMERIC[];
+    l_alm      NUMERIC[];
+    l_bod      NUMERIC[];
 BEGIN
     SELECT * INTO par FROM parametros;
     SELECT array_agg(pc.id_producto ORDER BY pc.n), array_agg(pc.precio_compra ORDER BY pc.n),
@@ -148,60 +153,76 @@ BEGIN
       JOIN unidades_medida u ON u.id_unidad = p.id_unidad
       JOIN stock_ini s ON s.n = pc.n;
     SELECT array_agg(id_cliente ORDER BY n) INTO clientes FROM cli_carga;
+    -- Métodos con comprobante: la venta lleva referencia y crea su pago pendiente (022)
+    SELECT array_agg(id_metodo_pago) INTO digitales FROM metodos_pago WHERE codigo IN ('NEQUI', 'DAVIPLATA', 'TRANSFERENCIA');
 
     FOR v IN
         SELECT g, now() - interval '364 days' + random() * interval '364 days' AS fecha
         FROM generate_series(1, par.n_ventas) g ORDER BY 2
     LOOP
-        INSERT INTO ventas (id_cliente, id_usuario, id_metodo_pago, fecha_venta)
-        VALUES (CASE WHEN random() < 0.7 AND clientes IS NOT NULL THEN clientes[1 + floor(random() * array_length(clientes, 1))::INT] END,
-                par.vendedores[1 + floor(random() * array_length(par.vendedores, 1))::INT],
-                par.metodos[1 + floor(random() * array_length(par.metodos, 1))::INT],
-                v.fecha)
-        RETURNING id_venta INTO v_id_venta;
+        -- Estadísticas al día cada 2.000 ventas. Sin esto el planificador sigue
+        -- creyendo que ventas y sus líneas están vacías (último ANALYZE) y las
+        -- verificaciones de llave foránea recorren la tabla entera en cada
+        -- inserción: la carga se vuelve cuadrática (50.000 ventas: 3,5 min en
+        -- vez de 20 s). El ANALYZE invalida esos planes guardados.
+        IF v.g % 2000 = 0 THEN
+            ANALYZE ventas;
+            ANALYZE detalles_ventas;
+            ANALYZE movimientos_inventario;
+        END IF;
 
+        -- 1. Se arman las líneas en memoria, descontando en cascada (RN-02)
         v_lineas := 1 + floor(random() * 5)::INT;
         v_inicio := floor(random() * array_length(ids, 1))::INT;
         v_salto  := 1 + floor(random() * 7)::INT;
         v_subtotal := 0;
-
+        l_pos := '{}'; l_cant := '{}'; l_alm := '{}'; l_bod := '{}';
         FOR k IN 0 .. v_lineas - 1 LOOP
             i := 1 + (v_inicio + k * v_salto) % array_length(ids, 1);   -- productos distintos en la venta
             v_cant := CASE WHEN decimales[i] THEN round((0.25 + random() * 2.75)::NUMERIC, 2)
                            ELSE 1 + floor(random() * 4) END;
             v_cant := least(v_cant, bodega[i] + almacen[i]);
             CONTINUE WHEN v_cant <= 0;                                  -- sin existencias: no se vende
-
-            v_de_alm := least(v_cant, almacen[i]);
-            v_de_bod := v_cant - v_de_alm;
-
-            INSERT INTO detalles_ventas (id_venta, id_producto, cantidad, precio_unitario, costo_unitario, subtotal_linea)
-            VALUES (v_id_venta, ids[i], v_cant, precios[i], costos[i], round(v_cant * precios[i], 2));
+            l_pos  := l_pos  || i;
+            l_cant := l_cant || v_cant;
+            l_alm  := l_alm  || least(v_cant, almacen[i]);
+            l_bod  := l_bod  || (v_cant - least(v_cant, almacen[i]));
+            almacen[i] := almacen[i] - l_alm[array_length(l_pos, 1)];
+            bodega[i]  := bodega[i]  - l_bod[array_length(l_pos, 1)];
             v_subtotal := v_subtotal + round(v_cant * precios[i], 2);
+        END LOOP;
+        -- Todos sus productos agotados: la venta no se crea
+        CONTINUE WHEN coalesce(array_length(l_pos, 1), 0) = 0;
 
-            IF v_de_alm > 0 THEN
-                almacen[i] := almacen[i] - v_de_alm;
+        -- 2. La venta se inserta ya con sus totales (chk_ventas_total)
+        v_desc := CASE WHEN random() < 0.1 THEN round(v_subtotal * 0.05, 2) ELSE 0 END;
+        v_metodo := par.metodos[1 + floor(random() * array_length(par.metodos, 1))::INT];
+        INSERT INTO ventas (id_cliente, id_usuario, id_metodo_pago, fecha_venta, subtotal, descuento, total, referencia_pago)
+        VALUES (CASE WHEN random() < 0.7 AND clientes IS NOT NULL THEN clientes[1 + floor(random() * array_length(clientes, 1))::INT] END,
+                par.vendedores[1 + floor(random() * array_length(par.vendedores, 1))::INT],
+                v_metodo, v.fecha, v_subtotal, v_desc, v_subtotal - v_desc,
+                CASE WHEN v_metodo = ANY (digitales) THEN 'CARGA-REF-' || v.g END)
+        RETURNING id_venta INTO v_id_venta;
+
+        -- 3. Líneas y movimientos con el saldo que dejó cada salida
+        FOR k IN 1 .. array_length(l_pos, 1) LOOP
+            i := l_pos[k];
+            INSERT INTO detalles_ventas (id_venta, id_producto, cantidad, precio_unitario, costo_unitario, subtotal_linea)
+            VALUES (v_id_venta, ids[i], l_cant[k], precios[i], costos[i], round(l_cant[k] * precios[i], 2));
+            -- El saldo de Almacén se registra antes de tocar Bodega
+            IF l_alm[k] > 0 THEN
                 INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, cantidad, costo_unitario,
                                                     saldo_bodega, saldo_almacen, id_usuario, id_venta, documento_referencia, fecha_movimiento)
-                VALUES (ids[i], 'SALIDA_VENTA', 'ALMACEN', v_de_alm, costos[i], bodega[i], almacen[i],
+                VALUES (ids[i], 'SALIDA_VENTA', 'ALMACEN', l_alm[k], costos[i], bodega[i] + l_bod[k], almacen[i],
                         par.u_inventario, v_id_venta, 'CARGA-VENTA-' || v_id_venta, v.fecha);
             END IF;
-            IF v_de_bod > 0 THEN
-                bodega[i] := bodega[i] - v_de_bod;
+            IF l_bod[k] > 0 THEN
                 INSERT INTO movimientos_inventario (id_producto, tipo_movimiento, ubicacion_origen, cantidad, costo_unitario,
                                                     saldo_bodega, saldo_almacen, id_usuario, id_venta, documento_referencia, fecha_movimiento)
-                VALUES (ids[i], 'SALIDA_VENTA', 'BODEGA', v_de_bod, costos[i], bodega[i], almacen[i],
+                VALUES (ids[i], 'SALIDA_VENTA', 'BODEGA', l_bod[k], costos[i], bodega[i], almacen[i],
                         par.u_inventario, v_id_venta, 'CARGA-VENTA-' || v_id_venta, v.fecha);
             END IF;
         END LOOP;
-
-        IF v_subtotal = 0 THEN                                          -- todos sus productos agotados
-            DELETE FROM ventas WHERE id_venta = v_id_venta;
-            CONTINUE;
-        END IF;
-        v_desc := CASE WHEN random() < 0.1 THEN round(v_subtotal * 0.05, 2) ELSE 0 END;
-        UPDATE ventas SET subtotal = v_subtotal, descuento = v_desc, total = v_subtotal - v_desc
-        WHERE id_venta = v_id_venta;
     END LOOP;
 
     -- El stock final del producto es el último saldo del Kardex

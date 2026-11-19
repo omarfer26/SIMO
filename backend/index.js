@@ -7,6 +7,7 @@ const JWT = require('./src/config/jwt'); // clave y expiración compartidas con 
 const pool = require('./db');
 const errorHandler = require('./middleware/errorHandler');
 const iniciarAuditoriaPedidos = require('./cron/auditarPedidos'); // SCRUM-69
+const { refrescarEnSegundoPlano: precalentarReportes } = require('./src/services/reportes.service');
 
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
@@ -244,4 +245,9 @@ iniciarAuditoriaPedidos();
 
 app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
+    // Reportes listos antes de la primera visita a la consola (SCRUM-168).
+    // REPORTES_PRECALENTAR=false lo desactiva (por ejemplo, en pruebas).
+    if (process.env.REPORTES_PRECALENTAR !== 'false') {
+        setTimeout(() => precalentarReportes(), 5000).unref();
+    }
 });

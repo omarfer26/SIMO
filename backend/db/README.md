@@ -28,12 +28,14 @@ db/
 │   ├── 020_ventas_pos.sql      fn_registrar_venta, fn_anular_venta y referencia de pago (HU-07, CU-11)
 │   ├── 021_traslados.sql       fn_registrar_traslado Bodega -> Almacén (HU-06)
 │   ├── 022_pagos_digitales.sql pagos_digitales y fn_conciliar_pago (SCRUM-78)
-│   └── 023_auditoria_precios.sql trigger CAMBIO_PRECIO en log_auditoria (SCRUM-77)
+│   ├── 023_auditoria_precios.sql trigger CAMBIO_PRECIO en log_auditoria (SCRUM-77)
+│   └── 024_indices_pedidos.sql índice de pedidos por fecha y auditoría de índices (SCRUM-168)
 ├── seeds/
 │   └── 001_datos_desarrollo.sql  usuarios de prueba, empresa, categorías, productos
 ├── carga/
 │   ├── poblar_masivo.sql         datos masivos coherentes para pruebas de carga (SCRUM-131)
-│   └── consultas_rendimiento.sql consultas de referencia con EXPLAIN ANALYZE (SCRUM-133)
+│   ├── consultas_rendimiento.sql consultas de referencia con EXPLAIN ANALYZE (SCRUM-133)
+│   └── medir_api.sh              tiempos de respuesta de los endpoints (SCRUM-168)
 └── tests/
     ├── 001_reglas_esquema.sql    42 pruebas de reglas de negocio (no deja datos)
     ├── 002_ingreso_bodega.sql    19 pruebas del ingreso a Bodega (no deja datos)
@@ -164,7 +166,7 @@ psql -d simo_retail -v productos=2000 -v clientes=5000 -v ventas=50000 -f db/car
 | Parámetros | Productos | Clientes | Ventas | Líneas | Movimientos | Tiempo |
 |---|---|---|---|---|---|---|
 | 1.000 / 2.000 / 10.000 | 1.000 | 2.000 | 10.000 | ~30.000 | ~32.600 | ~5 s |
-| 2.000 / 5.000 / 50.000 | 2.000 | 5.000 | 49.996 | ~150.000 | ~155.200 | ~22 s |
+| 2.000 / 5.000 / 50.000 | 2.000 | 5.000 | 49.995 | ~150.300 | ~155.600 | ~26 s |
 
 - Los datos son reproducibles (`setseed`) y se reconocen por el SKU `CARGA-…`, documentos
   de cliente `99…` y movimientos con documento `CARGA-…`.
@@ -193,3 +195,45 @@ Medido con `carga/consultas_rendimiento.sql` sobre 49.996 ventas y 149.953 líne
   por defecto (4) el planificador no usaba el índice en Q3.
 - Los índices se mantienen solos; tras cargas masivas conviene `VACUUM ANALYZE`
   para que los Index Only Scan no tengan que revisar la tabla.
+
+## Auditoría de índices y tiempos de la API (SCRUM-168)
+
+Con el esquema completo del Sprint 3 se midieron los **endpoints reales** (no solo las
+consultas) con `carga/medir_api.sh` sobre 2.000 productos, 5.000 clientes, 49.995 ventas,
+150.326 líneas, 155.579 movimientos, 24.981 pagos digitales y 200.000 pedidos.
+
+**Columnas clave de la historia:** ya estaban indexadas — `productos.sku` (UNIQUE, 003),
+`ventas.fecha_venta` (013) y `pedidos.estado` (004).
+
+**Índice nuevo (migración 024):** `idx_pedidos_fecha_solicitud (fecha_solicitud DESC, id_pedido DESC)`,
+en el orden de la lista de pedidos. Era la única consulta frecuente que recorría la tabla
+completa y crece con el tiempo:
+
+| Pedidos por fecha (200.000 pedidos) | Sin índice | Con índice |
+|---|---|---|
+| Último mes, ordenados | 17,7 ms (Seq Scan) | 0,45 ms (Index Only Scan) |
+| Última semana con cliente | 10,8 ms (Parallel Seq Scan) | 1,6 ms (Bitmap Index Scan) |
+
+**Llaves foráneas sin índice que se dejan así a propósito:** las 14 que apuntan a usuarios,
+métodos de pago, unidades y proveedores. Esas filas nunca se borran (se inactivan), así que
+un índice solo encarecería cada inserción en el Kardex, ventas y pedidos.
+
+**Lo que sí pasaba de 1 segundo no era falta de índices:**
+
+| Endpoint (primera vez, sin caché) | Antes | Después | Causa y corrección |
+|---|---|---|---|
+| `GET /api/reports` (consola) | 3,6 s | 0,003 s | Generaba los 9 archivos para dar su tamaño; ahora responde con la caché y genera en segundo plano |
+| Reporte de movimientos (Excel) | 1,26 s | 0,15 s | `toLocaleString` creaba un formateador por fecha (570 ms en 12.500 fechas); ahora se reutiliza uno |
+| `GET /api/orders` sin filtro | 1,1 s · 77 MB | 0,22 s · 15 MB | Devolvía la historia completa; ahora 180 días + todos los abiertos |
+| `GET /api/dashboard/alerts` (Gerente) | 0,57 s · 40 MB | 0,01 s · 0,6 MB | Devolvía todos los pedidos vencidos; ahora los 100 más atrasados y el total |
+
+Con eso, **todos los endpoints responden en menos de 0,25 s** con ese volumen (el más lento es
+la lista de pedidos sin filtro). Resultado completo: informe de SCRUM-168.
+
+**Hallazgo en la carga masiva:** el script de SCRUM-131 había quedado cuadrático (50.000
+ventas: 3,5 min en lugar de 22 s). El `ANALYZE` del final de la migración 013 deja
+registrado que `ventas` está vacía; durante una carga en una sola transacción el
+planificador sigue creyéndolo y cada verificación de llave foránea recorre la tabla entera.
+El script ahora actualiza las estadísticas cada 2.000 ventas (50.000 ventas: 26 s). En
+producción no ocurre: el autovacuum de PostgreSQL vuelve a analizar las tablas a medida que
+crecen.

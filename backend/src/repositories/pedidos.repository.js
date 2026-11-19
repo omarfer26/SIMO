@@ -3,6 +3,9 @@
 const pool = require('../config/db');
 
 // Un pedido abierto está vencido si ya pasó su fecha pactada (se calcula, no se guarda)
+// Lista de pedidos sin filtro de fechas: ventana por defecto (SCRUM-168)
+const DIAS_LISTA_PEDIDOS = 180;
+
 const VENCIDO = `(p.fecha_entrega_pactada < now() AND p.estado NOT IN ('ENTREGADO', 'CANCELADO'))`;
 
 // HU-10 — El stock ya salió del catálogo: se descontó al pasar a
@@ -96,6 +99,14 @@ async function listarPedidos({ desde, hasta, estado, idCliente }) {
     if (hasta) agregar('p.fecha_solicitud <= ?', hasta);
     if (estado) agregar('p.estado = ?', estado);
     if (idCliente) agregar('p.id_cliente = ?', idCliente);
+    // SCRUM-168: sin rango de fechas ni cliente, los últimos 180 días más todos
+    // los pedidos abiertos (aunque sean más antiguos: nunca se pierde uno
+    // pendiente). Antes devolvía la historia completa: con 200.000 pedidos,
+    // 77 MB y 1,1 s. Es el mismo criterio del historial de ventas.
+    if (!desde && !hasta && !idCliente) {
+        condiciones.push(`(p.fecha_solicitud >= now() - interval '${DIAS_LISTA_PEDIDOS} days'
+                           OR p.estado NOT IN ('ENTREGADO', 'CANCELADO'))`);
+    }
 
     const { rows } = await pool.query(
         `SELECT p.id_pedido, p.id_cliente, c.nombre AS nombre_cliente, p.id_usuario, u.nombre_completo AS nombre_usuario,
@@ -186,7 +197,8 @@ async function obtenerVentaDePedido(idVenta) {
 
 // SCRUM-69: pedidos abiertos cuya fecha pactada ya pasó. "Vencido" no es un
 // estado guardado (el ciclo RN-04 no lo tiene): se calcula con la fecha.
-async function pedidosVencidos() {
+// limite: cuántos devolver, los más atrasados primero (sin límite: todos).
+async function pedidosVencidos({ limite = null } = {}) {
     const { rows } = await pool.query(
         `SELECT p.id_pedido, c.nombre AS nombre_cliente, c.telefono AS telefono_cliente, p.estado,
                 p.fecha_entrega_pactada, p.total,
@@ -194,9 +206,16 @@ async function pedidosVencidos() {
          FROM pedidos p
          JOIN clientes c ON c.id_cliente = p.id_cliente
          WHERE ${VENCIDO}
-         ORDER BY p.fecha_entrega_pactada`
+         ORDER BY p.fecha_entrega_pactada, p.id_pedido
+         LIMIT $1`,
+        [limite]
     );
     return rows;
+}
+
+async function contarPedidosVencidos() {
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM pedidos p WHERE ${VENCIDO}`);
+    return rows[0].n;
 }
 
 async function estadoCliente(idCliente) {
@@ -214,5 +233,6 @@ module.exports = {
     buscarMetodoPago,
     obtenerVentaDePedido,
     pedidosVencidos,
+    contarPedidosVencidos,
     estadoCliente,
 };

@@ -285,7 +285,7 @@ Responde `201`:
 
 Consulta:
 
-- `GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&estado=&id_cliente=` → `{ data: [ { id_pedido, nombre_cliente, nombre_usuario, estado, fecha_solicitud, fecha_entrega_pactada, total, vencido, cantidad_productos, ... } ] }` (contrato de la lista del frontend, SCRUM-125), más recientes primero.
+- `GET /api/orders?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&estado=&id_cliente=` → `{ data: [ { id_pedido, nombre_cliente, nombre_usuario, estado, fecha_solicitud, fecha_entrega_pactada, total, vencido, cantidad_productos, ... } ] }` (contrato de la lista del frontend, SCRUM-125), más recientes primero. **Sin `desde`, `hasta` ni `id_cliente`** trae los últimos 180 días más todos los pedidos abiertos, aunque sean más antiguos (SCRUM-168); para pedidos cerrados más viejos se usa el rango de fechas o el historial del cliente.
 - `GET /api/orders/:id` → `{ pedido }` con líneas e historial.
 - Desde `EN_PREPARACION` las líneas del pedido ya no se pueden modificar (lo impide la base de datos).
 
@@ -392,8 +392,8 @@ Cada venta con `NEQUI`, `DAVIPLATA` o `TRANSFERENCIA` (del POS o de un pedido co
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/api/dashboard/metrics` | Ventas del mes y del día, valor del inventario, 5 productos más vendidos, pedidos abiertos y vencidos, pagos por conciliar. `ADMIN`, `GERENTE` |
-| GET | `/api/dashboard/alerts` | Alertas duales: `SURTIR` (Almacén en su mínimo y hay en Bodega) y `COMPRAR` (Bodega en su mínimo). Gerente y Administrador reciben además `pedidos_vencidos`. `ADMIN`, `GERENTE`, `INVENTARIO` |
-| GET | `/api/reports` | Catálogo de reportes `{ data: [ { id_reporte, nombre, descripcion, categoria, formato, periodo, fecha_generacion, tamano_bytes, nombre_archivo } ] }`. `ADMIN`, `GERENTE` |
+| GET | `/api/dashboard/alerts` | Alertas duales: `SURTIR` (Almacén en su mínimo y hay en Bodega) y `COMPRAR` (Bodega en su mínimo). Gerente y Administrador reciben además `pedidos_vencidos` (los 100 más atrasados) y `total_pedidos_vencidos`. `ADMIN`, `GERENTE`, `INVENTARIO` |
+| GET | `/api/reports` | Catálogo de reportes `{ data: [ { id_reporte, nombre, descripcion, categoria, formato, periodo, fecha_generacion, tamano_bytes, nombre_archivo } ] }`. Responde al instante: los archivos se generan en segundo plano y al descargarlos; uno aún no generado llega con `tamano_bytes: null`. `ADMIN`, `GERENTE` |
 | GET | `/api/reports/:id/download` | Descarga el Excel o PDF, generado con los datos del momento y los datos de la empresa en el encabezado |
 | GET | `/api/audit?desde=&hasta=&accion=` | Log de auditoría `{ data: [ { id_log, fecha, nombre_usuario, nombre_autorizador, accion, entidad, id_entidad, justificacion, datos_anteriores, datos_nuevos, direccion_ip } ] }`. Solo lectura. `ADMIN`, `GERENTE` |
 

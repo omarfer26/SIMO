@@ -452,13 +452,17 @@ caso('Reportes: catálogo con el contrato del frontend y descarga en Excel y PDF
         for (const campo of ['id_reporte', 'nombre', 'descripcion', 'categoria', 'formato', 'periodo', 'fecha_generacion', 'tamano_bytes', 'nombre_archivo']) {
             assert.ok(r[campo] !== undefined, `falta ${campo} en ${r.nombre}`);
         }
-        assert.ok(r.tamano_bytes > 0);
+        // El listado no genera archivos (SCRUM-168): sin generar aún, el tamaño llega null
+        assert.ok(r.tamano_bytes === null || r.tamano_bytes > 0, r.nombre);
         const archivo = await api(`/reports/${r.id_reporte}/download`, { token: t.admin, crudo: true });
         assert.equal(archivo.status, 200, r.nombre);
         // Excel es un zip (PK); PDF empieza por %PDF
         assert.equal(archivo.datos.subarray(0, r.formato === 'PDF' ? 4 : 2).toString('latin1'), r.formato === 'PDF' ? '%PDF' : 'PK', r.nombre);
         assert.match(archivo.headers.get('content-disposition'), new RegExp(r.formato === 'PDF' ? '\\.pdf"$' : '\\.xlsx"$'));
     }
+    // Ya descargados, el listado informa el tamaño real de cada archivo
+    const despues = (await api('/reports', { token: t.gerente })).body.data;
+    assert.ok(despues.every((r) => r.tamano_bytes > 0));
     assert.ok(body.data.every((r) => ['EXCEL', 'PDF'].includes(r.formato)));
     assert.ok((await api('/reports?formato=PDF', { token: t.gerente })).body.data.every((r) => r.formato === 'PDF'));
     assert.equal((await api('/reports/999/download', { token: t.gerente })).status, 404);

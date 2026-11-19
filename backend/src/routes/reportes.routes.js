@@ -37,7 +37,7 @@ router.get('/', verificarToken, consultan, async (req, res) => {
         }
         const categoria = req.query.categoria !== undefined ? String(req.query.categoria).trim().toUpperCase() : undefined;
 
-        const data = (await listarReportes()).filter((r) => (
+        const data = listarReportes().filter((r) => (
             (!formato || r.formato === formato)
             && (!categoria || r.categoria === categoria)
             && (!desde || r.fecha_generacion >= desde)

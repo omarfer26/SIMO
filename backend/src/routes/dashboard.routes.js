@@ -6,7 +6,11 @@
 const express = require('express');
 const pool = require('../config/db');
 const { verificarToken, verificarRol } = require('../../middleware/authMiddleware');
-const { pedidosVencidos } = require('../repositories/pedidos.repository');
+const { pedidosVencidos, contarPedidosVencidos } = require('../repositories/pedidos.repository');
+
+// Alertas del Gerente: los pedidos más atrasados y el total (SCRUM-168). Antes
+// devolvía todos: con miles de pedidos vencidos la respuesta pesaba 40 MB.
+const MAXIMO_PEDIDOS_VENCIDOS = 100;
 
 const router = express.Router();
 
@@ -105,7 +109,11 @@ router.get('/alerts', verificarToken, verificarRol('ADMIN', 'GERENTE', 'INVENTAR
             productos_criticos: productos,
         };
         if (req.usuario.rol !== 'INVENTARIO') {
-            respuesta.pedidos_vencidos = await pedidosVencidos();
+            const [lista, total] = await Promise.all([
+                pedidosVencidos({ limite: MAXIMO_PEDIDOS_VENCIDOS }), contarPedidosVencidos(),
+            ]);
+            respuesta.pedidos_vencidos = lista;
+            respuesta.total_pedidos_vencidos = total;
         }
         return res.status(200).json(respuesta);
     } catch (error) {
