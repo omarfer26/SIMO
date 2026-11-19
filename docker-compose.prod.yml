@@ -1,0 +1,101 @@
+# SIMO - Orquestación de producción del backend (SCRUM-173)
+#
+# Levanta la API exactamente con la misma imagen que se publica en Render
+# (backend/Dockerfile) y la enlaza a la base PostgreSQL de PRODUCCIÓN en Neon.
+# No incluye base de datos local: la única base oficial es Neon.
+#
+# Sirve para:
+#   · Verificar antes de un despliegue que la imagen de producción arranca y
+#     se conecta a Neon (mismas variables que en Render).
+#   · Correr la API en cualquier servidor con Docker si Render no está disponible
+#     (escenario E3 del plan DRP, deploy/DRP.md).
+#   · Aplicar las migraciones pendientes en Neon (perfil "migraciones").
+#
+# Uso (desde la raíz del repositorio):
+#   cp .env.prod.example .env.prod          # y completar los valores (nunca se sube a git)
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod ps    # debe decir (healthy)
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile migraciones run --rm migraciones
+#
+# En Render no se usa este archivo: Render construye la misma imagen con
+# render.yaml (Blueprint) y recibe las mismas variables desde su panel.
+name: simo-produccion
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: simo-api:produccion
+    container_name: simo_api_produccion
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Neon, rol simo_app (mínimo privilegio), host "-pooler", sslmode=require
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL en .env.prod (cadena de Neon del rol simo_app con -pooler)}
+      # La API no arranca sin una clave propia de al menos 32 caracteres
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET en .env.prod}
+      # Neon exige SSL (por defecto). Solo para probar contra una base local sin SSL: false
+      DB_SSL: ${DB_SSL:-}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-30m}
+      # Saltos de proxy delante de la API (Render, Cloudflare, nginx): 1
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      # Versión que informa /api/health (en Render la pone RENDER_GIT_COMMIT)
+      APP_VERSION: ${APP_VERSION:-}
+      TZ: America/Bogota
+    ports:
+      # Solo en este equipo: delante va el proxy o el túnel que publica la API
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    # Endurecimiento: sistema de archivos de solo lectura (la API no escribe en
+    # disco; los reportes se guardan en memoria), sin privilegios extra y con
+    # límites de memoria y CPU como los del plan de Render.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+    # Render envía SIGTERM y espera; la API termina las peticiones en curso
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Aplica en Neon las migraciones pendientes y renueva los permisos de simo_app.
+  # Todas las migraciones se pueden re-ejecutar (la integración continua lo
+  # comprueba en cada Pull Request). Termina con la auditoría del inventario.
+  migraciones:
+    image: postgres:18-alpine
+    profiles: ["migraciones"]
+    environment:
+      # Se comprueban al ejecutar (con ":?" compose las exigiría también para "up")
+      DATABASE_URL: ${NEON_MIGRACIONES_URL:-}
+      SIMO_APP_PASSWORD: ${SIMO_APP_PASSWORD:-}
+    volumes:
+      - ./backend:/b:ro
+    working_dir: /b
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        : "$${DATABASE_URL:?Defina NEON_MIGRACIONES_URL en .env.prod (cadena DIRECTA del dueño, sin -pooler)}" &&
+        : "$${SIMO_APP_PASSWORD:?Defina SIMO_APP_PASSWORD en .env.prod}" &&
+        sh db/neon/aplicar.sh &&
+        psql "$$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -v app_password="$$SIMO_APP_PASSWORD" -f db/roles/001_rol_aplicacion.sql > /dev/null &&
+        echo "SIMO > permisos de simo_app actualizados" &&
+        psql "$$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -c "CALL sp_auditar_kardex(NULL, NULL, NULL, NULL, true)"

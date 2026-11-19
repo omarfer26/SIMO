@@ -241,7 +241,7 @@ Variables mínimas para correr la API en otro servidor (o en un servicio como Re
 | Variable | Valor |
 |---|---|
 | `DATABASE_URL` | cadena de Neon del rol `simo_app` con el host `-pooler` y `sslmode=require` |
-| `JWT_SECRET` | clave larga y aleatoria (si falta se usa la de desarrollo) |
+| `JWT_SECRET` | **obligatoria**: 32 caracteres o más, aleatoria. En producción la API no arranca sin ella (SCRUM-173) |
 | `JWT_EXPIRES_IN` | opcional, por defecto `30m` |
 | `PORT` | puerto HTTP, por defecto 3000 |
 
@@ -296,3 +296,48 @@ Sin un secreto, el paso correspondiente se salta con un aviso en la ejecución (
 En Render, el despliegue automático por push se desactiva (`autoDeploy: false`) para que la
 API solo se despliegue después de pasar las pruebas. El frontend se publica con la
 integración de Git de su proveedor (Vercel).
+
+## Contenedores de producción y Render (SCRUM-173)
+
+La API de producción es **una sola imagen** (`backend/Dockerfile`: Node 22 Alpine, solo
+dependencias de producción, usuario sin privilegios) que se usa igual en dos lugares:
+
+| Dónde | Archivo | Base de datos |
+|---|---|---|
+| Render (producción) | `render.yaml` (Blueprint, `runtime: docker`, región Ohio = us-east-2 como Neon) | Neon, rol `simo_app`, host `-pooler` |
+| Cualquier servidor con Docker (verificación previa o respaldo si Render falla) | `docker-compose.prod.yml` | La misma de Neon |
+
+**Crear el servicio en Render** (una vez): New > Blueprint > repositorio `SIMO`. Render pide
+`DATABASE_URL` y genera `JWT_SECRET`. Luego copiar el Deploy Hook del servicio al secreto
+`RENDER_DEPLOY_HOOK` de GitHub y la URL pública a la variable `API_URL` (SCRUM-172).
+
+**Con Docker Compose** (desde la raíz; `.env.prod` nunca se sube):
+
+```bash
+cp .env.prod.example .env.prod
+```
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build --wait
+```
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile migraciones run --rm migraciones
+```
+
+El último comando aplica en Neon las migraciones pendientes, renueva los permisos de
+`simo_app` y audita el inventario (lo mismo que hace el despliegue automático).
+
+El contenedor queda endurecido: sistema de archivos de **solo lectura**, sin capacidades
+de Linux, sin escalada de privilegios, 512 MB de memoria y 1 CPU (como el plan de Render),
+registros rotados y comprobación de salud cada 30 s. Al recibir `SIGTERM` (Render y Docker
+lo envían antes de reemplazar el contenedor) la API deja de aceptar conexiones, termina
+las peticiones en curso y cierra las conexiones a la base.
+
+| Variable | Obligatoria | Valor |
+|---|---|---|
+| `DATABASE_URL` | Sí | Neon, rol `simo_app`, host `-pooler`, `sslmode=require` |
+| `JWT_SECRET` | Sí | 32+ caracteres aleatorios: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
+| `JWT_EXPIRES_IN`, `TRUST_PROXY`, `RATE_LIMIT_MAX` | No | `30m`, `1`, `100` |
+| `APP_VERSION` | No | Versión que informa `/api/health` (Render usa `RENDER_GIT_COMMIT`) |
+| `NEON_MIGRACIONES_URL`, `SIMO_APP_PASSWORD` | Solo perfil `migraciones` | Cadena directa del dueño y contraseña de `simo_app` |

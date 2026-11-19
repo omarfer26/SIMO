@@ -407,4 +407,6 @@ Cada venta con `NEQUI`, `DAVIPLATA` o `TRANSFERENCIA` (del POS o de un pedido co
 El despliegue del sistema (PostgreSQL, API, frontend, respaldos diarios y Cloudflare Tunnel) está en la carpeta `deploy/`. Ver `deploy/README.md` para la operación, `deploy/DRP.md` para el plan de recuperación ante desastres (respaldos, restauración verificada, RPO/RTO) y `deploy/GUIA_EQUIPO.md` para conectarse a la base de datos compartida.
 
 **Integración continua (SCRUM-172):** cada Pull Request ejecuta en GitHub Actions las 251 pruebas SQL, las pruebas de integración y unitarias de la API y la compilación del frontend; al llegar a `main` se aplican las migraciones en Neon, se audita el inventario y se despliega la API (`.github/workflows/ci.yml`, detalles en `deploy/README.md`).
+
+**Producción con Docker (SCRUM-173):** la API se publica en Render con la imagen de `backend/Dockerfile` (`render.yaml`) enlazada a Neon; `docker-compose.prod.yml` levanta esa misma imagen en cualquier servidor y aplica las migraciones (perfil `migraciones`). En producción `JWT_SECRET` es obligatoria.
 ```

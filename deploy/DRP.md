@@ -115,8 +115,11 @@ hora se deben volver a registrar.
 
 ### E3. Cayó el servidor de la API o del frontend
 
-Los datos no se ven afectados (están en Neon). Volver a desplegar desde el código con la
-guía de despliegue (`deploy/README.md`) y las mismas variables de entorno. Comprobar con P6.
+Los datos no se ven afectados (están en Neon). Volver a desplegar la API en Render
+(Manual Deploy) o, si Render no está disponible, levantar la misma imagen en cualquier
+servidor con Docker: `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build --wait`
+(sección "Contenedores de producción y Render" de `deploy/README.md`), con las mismas
+variables de entorno. Comprobar con P6.
 
 ### E4. Se filtró una credencial
 

@@ -1,15 +1,32 @@
+# SIMO - Blueprint de Render para la API (SCRUM-173)
+#
+# Render construye la MISMA imagen que docker-compose.prod.yml
+# (backend/Dockerfile) y la enlaza a la base de producción en Neon.
+# Crear en Render: New > Blueprint > este repositorio. Las variables con
+# "sync: false" se piden al crear el servicio y no quedan en el repositorio.
 services:
   - type: web
     name: simo-backend
-    runtime: node
-    rootDir: backend
-    buildCommand: npm install
-    startCommand: npm start
+    runtime: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    # Ohio (us-east-2): la misma región de AWS que la base de Neon
+    region: ohio
+    plan: free
+    branch: main
     # Solo se despliega desde la integración continua, después de las pruebas (SCRUM-172)
     autoDeploy: false
     healthCheckPath: /api/health
     envVars:
-      - key: DATABASE_URL
-        sync: false   # Se define manualmente en el dashboard de Render
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        sync: false   # Neon, rol simo_app, host "-pooler", sslmode=require
+      - key: JWT_SECRET
+        generateValue: true   # Render genera una clave aleatoria al crear el servicio
+      - key: JWT_EXPIRES_IN
+        value: 30m
+      - key: TRUST_PROXY
+        value: "1"
+      - key: TZ
+        value: America/Bogota

@@ -51,6 +51,9 @@ services:
       DB_USER: simo_app
       DB_PASSWORD: ${SIMO_APP_PASSWORD}
       PORT: 3000
+      # La imagen corre en modo producción: sin una clave propia de 32+
+      # caracteres la API no arranca (SCRUM-173)
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET en deploy/.env (32 caracteres o más)}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

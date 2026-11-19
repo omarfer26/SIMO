@@ -56,3 +56,6 @@ deploy/backups/
 # repositorio. Los 156 archivos que ya estaban commiteados se sacaron del
 # índice con `git rm -r --cached .qoder` (siguen en el disco).
 .qoder/
+
+# Plantilla sin secretos de docker-compose.prod.yml (SCRUM-173)
+!.env.prod.example

@@ -250,7 +250,7 @@ app.use(errorHandler);
 iniciarAuditoriaPedidos();
 iniciarAuditoriaKardex();
 
-app.listen(port, () => {
+const servidor = app.listen(port, () => {
     console.log(`Servidor de inventario corriendo en http://localhost:${port}`);
     // Reportes listos antes de la primera visita a la consola (SCRUM-168).
     // REPORTES_PRECALENTAR=false lo desactiva (por ejemplo, en pruebas).
@@ -258,3 +258,17 @@ app.listen(port, () => {
         setTimeout(() => precalentarReportes(), 5000).unref();
     }
 });
+
+// Apagado ordenado (SCRUM-173): Render y Docker envían SIGTERM antes de
+// reemplazar el contenedor. Se dejan de aceptar conexiones, se terminan las
+// peticiones en curso (una venta a medias nunca se corta) y se cierran las
+// conexiones a la base. Si algo se demora más de 10 s, se sale igual.
+function apagar(senal) {
+    console.log(`${senal} recibido: cerrando el servidor...`);
+    setTimeout(() => process.exit(1), 10000).unref();
+    servidor.close(() => {
+        pool.end().finally(() => process.exit(0));
+    });
+}
+process.once('SIGTERM', () => apagar('SIGTERM'));
+process.once('SIGINT', () => apagar('SIGINT'));
