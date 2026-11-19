@@ -1,16 +1,21 @@
-# SIMO - Respaldo diario de la base oficial en Neon (RNF-05, SCRUM-134)
+# SIMO - Respaldo diario de la base oficial en Neon (RNF-05, SCRUM-134, SCRUM-171)
 #
 # Corre en los servidores de GitHub, sin depender de ningún computador del
-# equipo. Genera un pg_dump, lo verifica, lo CIFRA (el repositorio puede ser
-# público) y lo guarda como artefacto de la ejecución durante 14 días.
+# equipo. Cada día:
+#   1. pg_dump de Neon y verificación del índice (pg_restore --list).
+#   2. PRUEBA DE RESTAURACIÓN: restaura el respaldo en una base PostgreSQL 18
+#      temporal con deploy/backup/restaurar.sh y exige que el inventario cuadre
+#      (sp_auditar_kardex estricto). Un respaldo que no se puede restaurar
+#      no sirve: si esta prueba falla, la ejecución falla y GitHub avisa.
+#   3. Suma SHA-256, CIFRADO AES-256 (el repositorio puede ser público) y
+#      artefacto guardado 14 días.
 #
 # Secretos del repositorio (Settings > Secrets and variables > Actions):
 #   NEON_BACKUP_URL  cadena DIRECTA de Neon (sin "-pooler") del dueño de la base
 #   RESPALDO_CLAVE   frase para cifrar los respaldos (guardarla en lugar seguro)
 #
-# GitHub solo ejecuta los workflows programados desde la rama principal (main):
-# empieza a correr solo cuando este archivo llegue a main.
-# Restauración: deploy/README.md, sección "Respaldos en GitHub Actions".
+# GitHub solo ejecuta los workflows programados desde la rama principal (main).
+# Plan de recuperación completo: deploy/DRP.md
 name: Respaldo diario Neon
 
 on:
@@ -23,30 +28,71 @@ permissions:
 
 jobs:
   respaldo:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     container: postgres:18-alpine
+    services:
+      # Base vacía y desechable donde se prueba la restauración
+      restaurada:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: prueba
+          POSTGRES_DB: simo_restaurada
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - name: Respaldo, verificación y cifrado
+      - name: Comprobar secretos
         env:
           NEON_BACKUP_URL: ${{ secrets.NEON_BACKUP_URL }}
           RESPALDO_CLAVE: ${{ secrets.RESPALDO_CLAVE }}
         run: |
-          set -eu
-          if [ -z "$NEON_BACKUP_URL" ] || [ -z "$RESPALDO_CLAVE" ]; then
-            echo "Faltan los secretos NEON_BACKUP_URL y/o RESPALDO_CLAVE" >&2
+          falta=""
+          [ -n "$NEON_BACKUP_URL" ] || falta="$falta NEON_BACKUP_URL"
+          [ -n "$RESPALDO_CLAVE" ] || falta="$falta RESPALDO_CLAVE"
+          if [ -n "$falta" ]; then
+            echo "::error title=Respaldo no realizado::Faltan los secretos del repositorio:$falta (Settings > Secrets and variables > Actions). Ver deploy/DRP.md"
             exit 1
           fi
-          apk add --no-cache openssl > /dev/null
+
+      - uses: actions/checkout@v4
+
+      - name: Respaldo de Neon
+        env:
+          NEON_BACKUP_URL: ${{ secrets.NEON_BACKUP_URL }}
+        run: |
+          set -eu
           nombre="simo_neon_$(TZ='<-05>5' date +%Y%m%d_%H%M)"
-          mkdir -p respaldo
           pg_dump --format=custom --no-owner --no-privileges --file="$nombre.dump" "$NEON_BACKUP_URL"
           pg_restore --list "$nombre.dump" > /dev/null
-          echo "Respaldo verificado: $(du -h "$nombre.dump" | cut -f1)"
-          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
-            -pass env:RESPALDO_CLAVE -in "$nombre.dump" -out "respaldo/$nombre.dump.enc"
-          rm "$nombre.dump"
+          sha256sum "$nombre.dump" > "$nombre.dump.sha256"
+          echo "Respaldo creado: $(du -h "$nombre.dump" | cut -f1)"
           echo "NOMBRE=$nombre" >> "$GITHUB_ENV"
+
+      - name: Prueba de restauración
+        env:
+          SIMO_APP_PASSWORD: prueba-restauracion
+        run: |
+          set -eu
+          if ! sh deploy/backup/restaurar.sh "$NOMBRE.dump" postgres://postgres:prueba@restaurada:5432/simo_restaurada; then
+            echo "::error title=Respaldo no restaurable::El respaldo $NOMBRE no pasó la prueba de restauración. Ver deploy/DRP.md"
+            exit 1
+          fi
+          echo "### Respaldo $NOMBRE verificado" >> "$GITHUB_STEP_SUMMARY"
+          echo "Restaurado en una base limpia; inventario consistente (sp_auditar_kardex estricto)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cifrado
+        env:
+          RESPALDO_CLAVE: ${{ secrets.RESPALDO_CLAVE }}
+        run: |
+          set -eu
+          apk add --no-cache openssl > /dev/null
+          mkdir -p respaldo
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -pass env:RESPALDO_CLAVE -in "$NOMBRE.dump" -out "respaldo/$NOMBRE.dump.enc"
+          # La suma es del archivo SIN cifrar: se comprueba después de descifrar
+          cp "$NOMBRE.dump.sha256" respaldo/
+          rm "$NOMBRE.dump"
 
       - name: Guardar respaldo cifrado
         uses: actions/upload-artifact@v4

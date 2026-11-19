@@ -8,11 +8,12 @@
 #   * la base local del despliegue (variables PG* de libpq), si PGHOST está definida
 #       -> /backups/simo_AAAAMMDD_HHMM.dump
 # Cada respaldo se verifica leyendo su índice con pg_restore --list antes de
-# darlo por bueno, y se borran los respaldos con más de BACKUP_RETENTION_DAYS días.
+# darlo por bueno y se guarda con su suma SHA-256 (archivo .sha256). Se borran
+# los respaldos con más de BACKUP_RETENTION_DAYS días.
 #
 # Respaldo manual inmediato:
 #   docker compose exec backup sh /opt/backup/respaldo.sh ahora
-# Restauración: ver deploy/backup/restaurar.sh y deploy/README.md
+# Restauración: deploy/backup/restaurar.sh · Plan de recuperación: deploy/DRP.md
 #
 # Variables: BACKUP_DATABASE_URL (Neon), PGHOST, PGUSER, PGPASSWORD, PGDATABASE,
 #            BACKUP_HOUR (0-23, por defecto 3), BACKUP_RETENTION_DAYS (por defecto 14)
@@ -30,6 +31,8 @@ respaldar_base() {
     if pg_dump --format=custom --no-owner --no-privileges --file="$archivo.tmp" ${2:+"$2"} \
        && pg_restore --list "$archivo.tmp" > /dev/null; then
         mv "$archivo.tmp" "$archivo"
+        # Suma SHA-256 al lado: restaurar.sh la comprueba antes de usar el respaldo
+        (cd "$DESTINO" && sha256sum "$(basename "$archivo")" > "$(basename "$archivo").sha256")
         echo "$(date '+%F %T') respaldo creado: $(basename "$archivo") ($(du -h "$archivo" | cut -f1))"
     else
         rm -f "$archivo.tmp"
@@ -51,7 +54,7 @@ respaldar() {
 }
 
 limpiar() {
-    find "$DESTINO" -name 'simo_*.dump' -type f -mtime +"$RETENCION" -print -delete \
+    find "$DESTINO" \( -name 'simo_*.dump' -o -name 'simo_*.dump.sha256' \) -type f -mtime +"$RETENCION" -print -delete \
         | sed 's/^/respaldo antiguo eliminado: /'
 }
 

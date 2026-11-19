@@ -141,8 +141,11 @@ docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d simo_retail -v 
 ### Respaldos en GitHub Actions (no dependen de esta Mac)
 
 `.github/workflows/respaldo-neon.yml` respalda Neon todos los días a las 03:00 desde los
-servidores de GitHub: `pg_dump`, verificación con `pg_restore --list`, cifrado AES-256
-(el repositorio puede ser público) y artefacto de la ejecución guardado 14 días.
+servidores de GitHub: `pg_dump`, verificación con `pg_restore --list`, **prueba de
+restauración** en una base PostgreSQL limpia con auditoría estricta del inventario, suma
+SHA-256, cifrado AES-256 (el repositorio puede ser público) y artefacto guardado 14 días.
+
+> Al 19/11/2026 todas sus ejecuciones fallan porque faltan los secretos del paso 1.
 
 Requisitos (los configura quien administra el repositorio):
 
@@ -157,16 +160,25 @@ Para restaurar: descargar el artefacto de la ejecución (Actions > ejecución > 
 descomprimir el .zip y descifrar:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in simo_neon_AAAAMMDD_HHMM.dump.enc -out simo_neon.dump
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in simo_neon_AAAAMMDD_HHMM.dump.enc -out simo_neon_AAAAMMDD_HHMM.dump
+```
+
+```bash
+sha256sum -c simo_neon_AAAAMMDD_HHMM.dump.sha256
 ```
 
 Después usar `restaurar.sh` como se indica abajo (o `pg_restore` sobre una rama nueva de Neon).
 
 ### Restaurar un respaldo
 
-`backup/restaurar.sh` restaura en **una sola transacción** (si algo falla, la base queda
-como estaba) y al final verifica: cuenta filas de las tablas principales y audita el
-Kardex con `fn_validar_kardex()`.
+> El procedimiento completo ante cada tipo de desastre, con objetivos RPO/RTO, roles y
+> simulacros, está en el **plan DRP: [DRP.md](DRP.md)** (SCRUM-171).
+
+`backup/restaurar.sh` comprueba la suma SHA-256 del respaldo, restaura en **una sola
+transacción** (si algo falla, la base queda como estaba) y al final verifica: cuenta filas
+de las tablas principales y audita el inventario con `sp_auditar_kardex(p_estricto => true)`.
+Termina con error (código 3) si el inventario restaurado no cuadra. Con `SIMO_APP_PASSWORD`
+definida y el repositorio disponible, también recrea los permisos del rol `simo_app`.
 
 **Prueba de restauración** (recomendada una vez por sprint): restaurar el último respaldo
 de Neon en una base local vacía y revisar la verificación.
@@ -197,7 +209,7 @@ docker compose start api
 nueva (Branches > Create branch), restaurar allí con su cadena de conexión y, una vez
 verificada, apuntar la API a esa rama. Restaurar directamente sobre la rama principal
 exige `SIMO_REEMPLAZAR=si` y `SIMO_CONFIRMAR_NEON=si`. Neon además guarda su propio
-historial (restauración a un punto en el tiempo) según el plan del proyecto.
+historial (restauración a un punto en el tiempo): en el proyecto `retail`, 6 horas.
 
 ### Empezar de cero (borra TODOS los datos)
 

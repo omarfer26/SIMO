@@ -404,5 +404,5 @@ Cada venta con `NEQUI`, `DAVIPLATA` o `TRANSFERENCIA` (del POS o de un pedido co
 
 ## 🚀 Despliegue
 
-El despliegue del sistema (PostgreSQL, API, frontend, respaldos diarios y Cloudflare Tunnel) está en la carpeta `deploy/`. Ver `deploy/README.md` para la operación y `deploy/GUIA_EQUIPO.md` para conectarse a la base de datos compartida.
+El despliegue del sistema (PostgreSQL, API, frontend, respaldos diarios y Cloudflare Tunnel) está en la carpeta `deploy/`. Ver `deploy/README.md` para la operación, `deploy/DRP.md` para el plan de recuperación ante desastres (respaldos, restauración verificada, RPO/RTO) y `deploy/GUIA_EQUIPO.md` para conectarse a la base de datos compartida.
 ```
