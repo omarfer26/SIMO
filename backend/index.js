@@ -94,8 +94,18 @@ app.use('/api/company', empresaRoutes);
 // Render lo publica en RENDER_GIT_COMMIT y otros despliegues pueden definir
 // APP_VERSION. La integración continua lo usa para confirmar que la versión
 // nueva ya está en línea (SCRUM-172).
+//
+// Por defecto NO consulta la base. Docker, Render y los monitores llaman este
+// endpoint cada pocos segundos: con un SELECT 1 en cada llamada Neon nunca
+// llegaba a los 5 minutos sin actividad que necesita para suspenderse, quedó
+// encendida ~22 h al día y agotó la cuota mensual del plan gratuito (100 CU-h)
+// el 20/11/2026, dejando la base inaccesible. Para verificar también la base:
+// GET /api/health?db=1 (lo usan el plan DRP y las pruebas, no los monitores).
 const VERSION = (process.env.APP_VERSION || process.env.RENDER_GIT_COMMIT || '').slice(0, 40) || null;
 app.get('/api/health', async (req, res) => {
+    if (req.query.db === undefined) {
+        return res.json({ status: 'ok', version: VERSION });
+    }
     try {
         await pool.query('SELECT 1');
         res.json({ status: 'ok', database: 'ok', version: VERSION });

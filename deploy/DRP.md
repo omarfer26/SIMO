@@ -107,7 +107,7 @@ Si el rol `simo_app` no existe en un proyecto nuevo, crearlo en el panel de Neon
 **P5. Reconectar la API.** Cambiar `DATABASE_URL` del servidor de la API por la cadena
 **con pooler** del rol `simo_app` en la base restaurada y reiniciar la API.
 
-**P6. Comprobar el servicio.** `GET /api/health` responde 200; iniciar sesión como gerente
+**P6. Comprobar el servicio.** `GET /api/health?db=1` responde 200 con `database: ok`; iniciar sesión como gerente
 y revisar el dashboard y `GET /api/inventory/kardex-audit` (`consistente: true`).
 
 **P7. Informar** al equipo la fecha del respaldo usado: las operaciones posteriores a esa
@@ -133,6 +133,25 @@ variables de entorno. Comprobar con P6.
 ### E5. El respaldo más reciente está dañado
 
 `restaurar.sh` lo detecta (salida 1 o 3). Usar el del día anterior: hay 14 días disponibles.
+
+### E6. Neon rechaza las conexiones por cuota agotada
+
+*Síntoma:* la API responde 503 en `/api/health?db=1` y Neon devuelve
+"Your account or project has exceeded the quota" (HTTP 402). El plan gratuito incluye
+unas 100 CU-hora al mes por proyecto; la cuota se renueva el día 1 de cada mes.
+
+1. Confirmar el consumo en el panel de Neon (proyecto `retail` > Usage).
+2. Opciones, de menor a mayor esfuerzo: (a) esperar al día 1; (b) que el dueño del
+   proyecto pase a un plan de pago; (c) restaurar el último respaldo en un proyecto de
+   Neon nuevo con cuota propia (procedimiento P) y apuntar la API a él. Con (c) las
+   operaciones posteriores al respaldo se pierden o se vuelven a registrar (P7).
+3. Quitar la causa: ningún cliente debe consultar la base de forma periódica. Los
+   chequeos de salud usan `/api/health` **sin** `?db=1`.
+
+**Incidente del 20/11/2026:** el chequeo de salud de la API de la Mac (Docker, cada 30 s)
+ejecutaba `SELECT 1` en Neon. La base nunca se suspendía (≈ 22 h encendida al día desde
+el 07/11), consumió 110 CU-hora y quedó bloqueada desde el 20/11 a las 19:00. Corregido:
+`/api/health` ya no consulta la base salvo con `?db=1`.
 
 ## 5. Roles
 

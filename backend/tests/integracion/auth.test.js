@@ -46,8 +46,16 @@ async function limpiar() {
 
 // --------------------------------- Estado del servicio (SCRUM-172) ---------------------------------
 
-caso('GET /api/health responde sin sesión con la base y la versión desplegada', async () => {
+caso('GET /api/health responde sin sesión con la versión y SIN consultar la base', async () => {
+    // Los monitores lo llaman cada pocos segundos: si consultara la base, Neon
+    // nunca se suspendería y se agotaría la cuota (incidente del 20/11/2026)
     const { status, body } = await peticion('/health');
+    assert.equal(status, 200);
+    assert.deepEqual(body, { status: 'ok', version: 'prueba-ci' });
+});
+
+caso('GET /api/health?db=1 verifica además la conexión a la base', async () => {
+    const { status, body } = await peticion('/health?db=1');
     assert.equal(status, 200);
     assert.deepEqual(body, { status: 'ok', database: 'ok', version: 'prueba-ci' });
 });

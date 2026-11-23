@@ -81,8 +81,12 @@ docker compose exec api node tools/crear-admin.js "Ramón Machuca" ramondavidmc@
 Comprobar la API desde la Mac:
 
 ```bash
-curl http://localhost:3000/api/health
+curl 'http://localhost:3000/api/health?db=1'
 ```
+
+`/api/health` sin parámetros no consulta la base (es el que usan Docker y Render cada
+pocos segundos); con `?db=1` verifica también la conexión. Ver el incidente del 20/11/2026
+en `DRP.md` (E6).
 
 ## 4. Operación diaria
 
