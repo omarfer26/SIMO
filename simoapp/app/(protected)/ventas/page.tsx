@@ -21,6 +21,7 @@ import { listarUsuarios } from "@/lib/auth/authService";
 import type { UsuarioListado } from "@/lib/auth/tipos";
 import HistorialVentas from "@/components/ventas/HistorialVentas";
 import ModalAutorizarAnulacion from "@/components/ventas/ModalAutorizarAnulacion";
+import ModalAtajosTeclado from "@/components/ventas/ModalAtajosTeclado";
 import {
   anexarVentaHistorial,
   listarVentas,
@@ -64,6 +65,7 @@ export default function VentasPage() {
   const [cargandoHistorial, setCargandoHistorial] = useState(true);
   const [ventaParaAnular, setVentaParaAnular] = useState<VentaHistorial | null>(null);
   const [modalAnularAbierto, setModalAnularAbierto] = useState(false);
+  const [modalAtajosAbierto, setModalAtajosAbierto] = useState(false);
 
   // Cargar historial de ventas
   useEffect(() => {
@@ -231,12 +233,80 @@ export default function VentasPage() {
     }
   };
 
-  // 3. Listener para Lector de Código de Barras USB (Captura ultra rápida estilo teclado HID)
+  // 3. Listener para Lector de Código de Barras USB y Atajos de Teclado del Cajero (F1, F2, F3, F4, Supr)
   useEffect(() => {
     let buffer = "";
     let ultimoTiempo = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Atajo F1: Guía de atajos de teclado
+      if (e.key === "F1") {
+        e.preventDefault();
+        setModalAtajosAbierto((prev) => !prev);
+        return;
+      }
+
+      // Atajo F2: Buscar/seleccionar cliente
+      if (e.key === "F2") {
+        e.preventDefault();
+        abrirBuscarCliente();
+        return;
+      }
+
+      // Atajo F3: Enfocar buscador de productos
+      if (e.key === "F3") {
+        e.preventDefault();
+        const inputBuscar = document.querySelector<HTMLInputElement>('input[name="busqueda"]');
+        if (inputBuscar) {
+          inputBuscar.focus();
+          inputBuscar.select();
+        }
+        return;
+      }
+
+      // Atajo F4 o F9: Confirmar venta / proceder al cobro
+      if (e.key === "F4" || e.key === "F9") {
+        e.preventDefault();
+        if (canasta.length > 0) {
+          setConfirmando(true);
+        } else {
+          avisar({
+            variante: "aviso",
+            titulo: "Canasta vacía",
+            detalle: "Agregue al menos un producto antes de proceder al cobro.",
+          });
+        }
+        return;
+      }
+
+      // Atajo F8: Anular última venta
+      if (e.key === "F8") {
+        e.preventDefault();
+        const ultima = ventasHistorial.find((v) => v.estado === "COMPLETADA");
+        if (ultima) {
+          setVentaParaAnular(ultima);
+          setModalAnularAbierto(true);
+        } else {
+          avisar({
+            variante: "aviso",
+            titulo: "Sin ventas activas",
+            detalle: "No hay ventas recientes pendientes de anulación.",
+          });
+        }
+        return;
+      }
+
+      // Atajo Delete / Supr: Vaciar canasta
+      if (e.key === "Delete" && e.ctrlKey) {
+        if (canasta.length > 0) {
+          e.preventDefault();
+          if (window.confirm("¿Deseas vaciar la canasta de compras actual?")) {
+            setCanasta([]);
+          }
+        }
+        return;
+      }
+
       // Ignorar teclas especiales que no corresponden a caracteres imprimibles ni Enter
       if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
         return;
@@ -271,7 +341,7 @@ export default function VentasPage() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [productos, canasta]);
+  }, [productos, canasta, ventasHistorial]);
 
   const modificarCantidad = (id: number, delta: number) => {
     // La revisión se hace fuera del actualizador de setCanasta: notificar desde
@@ -354,6 +424,21 @@ export default function VentasPage() {
               Historial y Anulaciones ({ventasHistorial.length})
             </button>
           </div>
+
+          {/* Botón de Ayuda de Atajos de Teclado F1 */}
+          {pestañaActiva === "pos" && (
+            <Button
+              variant="secondary"
+              className="text-xs py-1.5 px-3 flex items-center gap-1.5 shadow-xs"
+              onClick={() => setModalAtajosAbierto(true)}
+              title="Ver guía de atajos de teclado (F1)"
+            >
+              <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                F1
+              </kbd>
+              <span>Atajos</span>
+            </Button>
+          )}
 
           {/* Botón directo de anulación desde el POS */}
           {pestañaActiva === "pos" && (
@@ -676,6 +761,12 @@ export default function VentasPage() {
         </div>
       </div>
       )}
+
+      {/* Modal de Ayuda de Atajos de Teclado F1 */}
+      <ModalAtajosTeclado
+        isOpen={modalAtajosAbierto}
+        onClose={() => setModalAtajosAbierto(false)}
+      />
 
       {/* Modal de Autorización Gerencial para Anular Venta */}
       <ModalAutorizarAnulacion
