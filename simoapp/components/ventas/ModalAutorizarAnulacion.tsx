@@ -3,11 +3,22 @@
 // Componente modal para solicitar credenciales de Gerente o Administrador
 // antes de autorizar la anulación de una venta.
 // Cumple con la regla de negocio: solo GERENTE o ADMIN pueden autorizar.
+//
+// SCRUM-159 (Camilo) — Doble confirmación. Ahora va en DOS pasos:
+//  Paso 1 "datos": el formulario de siempre (motivo + credenciales). El botón
+//    "Revisar anulación" valida y pasa al paso 2, sin llamar al backend.
+//  Paso 2 "confirmar": aviso rojo "no se puede deshacer" con el resumen
+//    (venta, total, lo que vuelve al inventario, motivo y quién autoriza).
+//    Recién "Sí, anular venta" llama a anularVenta().
+// Si el backend rechaza (contraseña mala, rol sin permiso, sin conexión),
+// vuelve al paso 1 con el error y lo escrito, para corregir. Al cerrar el
+// modal se borra todo (no queda la contraseña del gerente para la próxima).
 
 import { useState } from "react";
 import Button from "@/components/ui/Button";
 import InputText from "@/components/ui/InputText";
 import { Modal } from "@/components/ui/Modal";
+import ConfirmacionDestructiva from "@/components/ui/ConfirmacionDestructiva";
 import { anularVenta, ErrorAnulacion } from "@/lib/ventas/anulacionService";
 import type { ResultadoAnulacion, VentaHistorial } from "@/lib/ventas/tipos";
 
@@ -35,10 +46,24 @@ export default function ModalAutorizarAnulacion({
   const [motivo, setMotivo] = useState("");
   const [errorValidacion, setErrorValidacion] = useState<string | null>(null);
   const [procesando, setProcesando] = useState(false);
+  // SCRUM-159 — En qué paso va: el formulario o el "¿seguro?".
+  const [paso, setPaso] = useState<"datos" | "confirmar">("datos");
 
   if (!venta) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // SCRUM-159 — Cerrar borra todo, para que la próxima venta arranque limpia.
+  const cerrar = () => {
+    if (procesando) return;
+    setPaso("datos");
+    setCorreo("");
+    setPassword("");
+    setMotivo("");
+    setErrorValidacion(null);
+    onClose();
+  };
+
+  // Paso 1 → paso 2: solo valida lo escrito; todavía no se anula nada.
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorValidacion(null);
 
@@ -53,6 +78,14 @@ export default function ModalAutorizarAnulacion({
       return;
     }
 
+    setPaso("confirmar");
+  };
+
+  // Paso 2: "Sí, anular venta". Aquí sí se llama al backend.
+  const confirmarAnulacion = async () => {
+    if (procesando) return;
+    const emailTrim = correo.trim();
+    setErrorValidacion(null);
     setProcesando(true);
     try {
       const resultado = await anularVenta({
@@ -65,12 +98,16 @@ export default function ModalAutorizarAnulacion({
       });
 
       // Limpiar y notificar éxito
+      setPaso("datos");
       setCorreo("");
       setPassword("");
       setMotivo("");
       onAnulacionExitosa(resultado, venta);
       onClose();
     } catch (err: unknown) {
+      // SCRUM-159 — Vuelve al formulario para corregir (casi siempre es la
+      // contraseña o el correo del autorizador).
+      setPaso("datos");
       if (err instanceof ErrorAnulacion) {
         setErrorValidacion(err.message);
       } else if (err instanceof Error) {
@@ -86,16 +123,56 @@ export default function ModalAutorizarAnulacion({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={() => {
-        if (!procesando) {
-          setErrorValidacion(null);
-          onClose();
-        }
-      }}
-      title="Autorización Gerencial Requerida"
+      onClose={cerrar}
+      title={paso === "datos" ? "Autorización Gerencial Requerida" : "Confirmar anulación"}
       maxWidth="md"
       closeOnBackdropClick={!procesando}
     >
+      {paso === "confirmar" ? (
+        <ConfirmacionDestructiva
+          titulo={`¿Anular la venta #${venta.idVenta}?`}
+          textoConfirmar="Sí, anular venta"
+          textoProcesando="Verificando y anulando…"
+          procesando={procesando}
+          onConfirmar={confirmarAnulacion}
+          onVolver={() => setPaso("datos")}
+        >
+          <div className="flex justify-between gap-3">
+            <span>Venta</span>
+            <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">#{venta.idVenta}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Total que se anula</span>
+            <span className="font-bold text-red-600 dark:text-red-400">
+              {formatoMoneda.format(venta.total)}
+            </span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Cliente</span>
+            <span className="text-right">{venta.cliente?.nombre || "Consumidor Final"}</span>
+          </div>
+          <div className="border-t border-zinc-200 pt-2 dark:border-zinc-700/60">
+            <p className="font-medium text-zinc-900 dark:text-zinc-100">Vuelven al inventario:</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {venta.items.map((it) => (
+                <li key={it.idProducto}>
+                  {it.cantidad} × {it.nombreProducto}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="border-t border-zinc-200 pt-2 dark:border-zinc-700/60">
+            <p>
+              <span className="font-medium text-zinc-900 dark:text-zinc-100">Motivo:</span>{" "}
+              <span className="break-words">{motivo.trim()}</span>
+            </p>
+            <p>
+              <span className="font-medium text-zinc-900 dark:text-zinc-100">Autoriza:</span>{" "}
+              <span className="break-all">{correo.trim()}</span>
+            </p>
+          </div>
+        </ConfirmacionDestructiva>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Banner de Advertencia */}
         <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
@@ -229,28 +306,18 @@ export default function ModalAutorizarAnulacion({
           <Button
             type="button"
             variant="secondary"
-            onClick={onClose}
+            onClick={cerrar}
             disabled={procesando}
           >
             Cancelar
           </Button>
-          <Button
-            type="submit"
-            variant="danger"
-            disabled={procesando}
-            className="flex items-center gap-2"
-          >
-            {procesando ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                <span>Verificando y Anulando...</span>
-              </>
-            ) : (
-              <span>Autorizar y Anular Venta</span>
-            )}
+          {/* SCRUM-159 — Ya no anula: lleva al paso de confirmación. */}
+          <Button type="submit" variant="danger" disabled={procesando}>
+            Revisar anulación
           </Button>
         </div>
       </form>
+      )}
     </Modal>
   );
 }

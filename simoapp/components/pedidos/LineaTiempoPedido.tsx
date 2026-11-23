@@ -9,10 +9,22 @@
 // EP-04 — Las acciones dependen del rol (lib/auth/permisos.ts): el Vendedor
 // mueve todo el ciclo y cancela, el Encargado de Inventario solo alista y el
 // Administrador y el Gerente únicamente miran la trazabilidad.
+//
+// SCRUM-159 (Camilo) — Cancelar ya no usa las ventanitas del navegador
+// (window.prompt / window.alert). "Cancelar Pedido" abre, en esta misma
+// tarjeta, un panel en dos pasos:
+//  1. "motivo": se escribe el motivo (obligatorio, máx. 500 caracteres).
+//  2. "confirmar": aviso rojo con el resumen (cliente, total, estado, si el
+//     stock vuelve o no al inventario, motivo). Recién "Sí, cancelar pedido"
+//     llama a onCambiarEstado. Si el backend falla, el error se muestra aquí
+//     mismo y se puede reintentar o volver.
 
 import { useState } from "react";
 import Button from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import ConfirmacionDestructiva from "@/components/ui/ConfirmacionDestructiva";
+import { useProductos } from "@/components/catalogo/ProductosContext";
+import { mensajeErrorCambioEstado } from "@/lib/pedidos/pedidosService";
 import {
   CICLO_PROGRESIVO,
   NOMBRES_ESTADO,
@@ -62,6 +74,18 @@ const ICONO_ETAPA: Record<EstadoPedido, string> = {
   CANCELADO: "M6 18L18 6M6 6l12 12",
 };
 
+// SCRUM-159 — Igual que el backend (POST /api/orders/:id/cancel).
+const MAX_MOTIVO = 500;
+
+const formatoMoneda = new Intl.NumberFormat("es-CO", {
+  style: "currency",
+  currency: "COP",
+  maximumFractionDigits: 0,
+});
+
+/** SCRUM-159 — Panel de cancelación: cerrado, escribiendo el motivo o confirmando. */
+type PasoCancelacion = null | "motivo" | "confirmar";
+
 export default function LineaTiempoPedido({
   pedido,
   onCambiarEstado,
@@ -69,6 +93,12 @@ export default function LineaTiempoPedido({
   permiteCancelar = true,
 }: LineaTiempoPedidoProps) {
   const [procesando, setProcesando] = useState(false);
+  // SCRUM-159 — Estado del panel de cancelación.
+  const [pasoCancelacion, setPasoCancelacion] = useState<PasoCancelacion>(null);
+  const [motivo, setMotivo] = useState("");
+  const [errorMotivo, setErrorMotivo] = useState<string | null>(null);
+  const [errorCancelacion, setErrorCancelacion] = useState<string | null>(null);
+  const { productos } = useProductos();
   const transiciones = TRANSICIONES_VALIDAS[pedido.estado] || [];
 
   // Próximo estado progresivo que este rol puede aplicar (sin contar CANCELADO)
@@ -92,6 +122,53 @@ export default function LineaTiempoPedido({
       setProcesando(false);
     }
   };
+
+  // SCRUM-159 — Cerrar el panel borra lo escrito.
+  const cerrarCancelacion = () => {
+    if (procesando) return;
+    setPasoCancelacion(null);
+    setMotivo("");
+    setErrorMotivo(null);
+    setErrorCancelacion(null);
+  };
+
+  // Paso 1 → paso 2: solo valida el motivo.
+  const revisarCancelacion = (e: React.FormEvent) => {
+    e.preventDefault();
+    const limpio = motivo.trim();
+    if (!limpio) {
+      setErrorMotivo("Escribe el motivo de la cancelación.");
+      return;
+    }
+    if (limpio.length > MAX_MOTIVO) {
+      setErrorMotivo(`El motivo admite máximo ${MAX_MOTIVO} caracteres.`);
+      return;
+    }
+    setErrorMotivo(null);
+    setErrorCancelacion(null);
+    setPasoCancelacion("confirmar");
+  };
+
+  // Paso 2: "Sí, cancelar pedido". La página lanza el error si el backend
+  // rechaza, para mostrarlo aquí sin cerrar el panel.
+  const confirmarCancelacion = async () => {
+    if (procesando) return;
+    setProcesando(true);
+    setErrorCancelacion(null);
+    try {
+      await onCambiarEstado(pedido.id, "CANCELADO", motivo.trim());
+      setPasoCancelacion(null);
+      setMotivo("");
+    } catch (err) {
+      setErrorCancelacion(mensajeErrorCambioEstado(err));
+    } finally {
+      setProcesando(false);
+    }
+  };
+
+  // Nombre del producto para el resumen (las líneas solo traen el id).
+  const nombreProducto = (idProducto: number) =>
+    productos.find((p) => p.id === idProducto)?.nombre ?? `Producto #${idProducto}`;
 
   return (
     <div className="space-y-6">
@@ -177,7 +254,120 @@ export default function LineaTiempoPedido({
         </ol>
       </div>
 
+      {/* SCRUM-159 — Panel de cancelación en dos pasos (reemplaza los controles mientras está abierto) */}
+      {pasoCancelacion === "motivo" && (
+        <form
+          onSubmit={revisarCancelacion}
+          noValidate
+          className="space-y-3 rounded-lg border border-red-200 bg-red-50/40 p-4 dark:border-red-900/40 dark:bg-red-950/20"
+        >
+          <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Cancelar el pedido #{pedido.id}
+          </p>
+          <div>
+            <label
+              htmlFor={`motivo-cancelacion-${pedido.id}`}
+              className="mb-1 block text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300"
+            >
+              Motivo de la cancelación <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id={`motivo-cancelacion-${pedido.id}`}
+              rows={3}
+              autoFocus
+              value={motivo}
+              maxLength={MAX_MOTIVO}
+              onChange={(e) => {
+                setMotivo(e.target.value);
+                if (errorMotivo) setErrorMotivo(null);
+              }}
+              placeholder="Ej: el cliente ya no necesita los productos, no se pudo contactar al cliente…"
+              aria-invalid={Boolean(errorMotivo)}
+              aria-describedby={`ayuda-motivo-${pedido.id}`}
+              className={`w-full rounded-md border bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-1 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 ${
+                errorMotivo
+                  ? "border-red-400 focus:border-red-500 focus:ring-red-500"
+                  : "border-zinc-300 focus:border-emerald-500 focus:ring-emerald-500 dark:border-zinc-700"
+              }`}
+            />
+            <p
+              id={`ayuda-motivo-${pedido.id}`}
+              className={`mt-1 flex justify-between gap-2 text-xs ${errorMotivo ? "text-red-600 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"}`}
+            >
+              <span role={errorMotivo ? "alert" : undefined}>
+                {errorMotivo ?? "Queda en el historial del pedido y en la auditoría."}
+              </span>
+              <span className="shrink-0 tabular-nums">
+                {motivo.length}/{MAX_MOTIVO}
+              </span>
+            </p>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+            <Button type="button" variant="secondary" onClick={cerrarCancelacion}>
+              Volver
+            </Button>
+            <Button type="submit" variant="danger">
+              Revisar cancelación
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {pasoCancelacion === "confirmar" && (
+        <ConfirmacionDestructiva
+          titulo={`¿Cancelar el pedido #${pedido.id}?`}
+          textoConfirmar="Sí, cancelar pedido"
+          textoProcesando="Cancelando…"
+          procesando={procesando}
+          error={errorCancelacion}
+          onConfirmar={confirmarCancelacion}
+          onVolver={() => {
+            setErrorCancelacion(null);
+            setPasoCancelacion("motivo");
+          }}
+        >
+          <div className="flex justify-between gap-3">
+            <span>Cliente</span>
+            <span className="text-right font-medium text-zinc-900 dark:text-zinc-100">{pedido.cliente}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Total del pedido</span>
+            <span className="font-bold text-red-600 dark:text-red-400">{formatoMoneda.format(pedido.total)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Estado actual</span>
+            <span className="font-medium">{NOMBRES_ESTADO[pedido.estado]}</span>
+          </div>
+          <div className="border-t border-zinc-200 pt-2 dark:border-zinc-700/60">
+            {pedido.stockReservado ? (
+              <>
+                <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                  El stock que se apartó para este pedido vuelve al inventario
+                  {pedido.lineas && pedido.lineas.length > 0 ? ":" : "."}
+                </p>
+                {pedido.lineas && pedido.lineas.length > 0 && (
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {pedido.lineas.map((l) => (
+                      <li key={l.idProducto}>
+                        {l.cantidad} × {nombreProducto(l.idProducto)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <p>Este pedido todavía no había descontado stock: el inventario no cambia.</p>
+            )}
+          </div>
+          <p className="border-t border-zinc-200 pt-2 dark:border-zinc-700/60">
+            <span className="font-medium text-zinc-900 dark:text-zinc-100">Motivo:</span>{" "}
+            <span className="break-words">{motivo.trim()}</span>
+          </p>
+        </ConfirmacionDestructiva>
+      )}
+
       {/* Controles Interactivos de Acción */}
+      {pasoCancelacion === null && (
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-800/40">
         <div>
           <span className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block font-semibold">
@@ -210,19 +400,10 @@ export default function LineaTiempoPedido({
               variant="danger"
               className="text-xs py-2 px-3"
               disabled={procesando}
-              onClick={() => {
-                // CU-13 EX-2: la cancelación exige motivo escrito; queda en el
-                // historial del pedido y en la auditoría inalterable (HU-15).
-                const motivo = window.prompt(
-                  `Motivo de la cancelación del pedido #${pedido.id}:`,
-                );
-                if (motivo === null) return;
-                if (!motivo.trim()) {
-                  window.alert("El motivo es obligatorio para cancelar un pedido.");
-                  return;
-                }
-                manejarCambio("CANCELADO", motivo.trim());
-              }}
+              // CU-13 EX-2: la cancelación exige motivo escrito; queda en el
+              // historial del pedido y en la auditoría inalterable (HU-15).
+              // SCRUM-159 — Abre el panel de dos pasos (antes, window.prompt).
+              onClick={() => setPasoCancelacion("motivo")}
             >
               Cancelar Pedido
             </Button>
@@ -259,6 +440,7 @@ export default function LineaTiempoPedido({
           ) : null}
         </div>
       </div>
+      )}
     </div>
   );
 }

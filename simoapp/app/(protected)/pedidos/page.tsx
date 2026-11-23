@@ -243,6 +243,9 @@ export default function PedidosPage() {
       );
       setTimeout(() => setAvisoExito(null), 4000);
     } catch (err: unknown) {
+      // SCRUM-159 (Camilo) — La cancelación muestra el error en su propio
+      // panel de confirmación (LineaTiempoPedido), sin cerrarlo.
+      if (nuevoEstado === "CANCELADO") throw err;
       alert(mensajeErrorCambioEstado(err));
     }
   };
@@ -589,6 +592,7 @@ export default function PedidosPage() {
 
             {/* Línea de Tiempo Interactiva */}
             <LineaTiempoPedido
+              key={pedidoSeleccionado.id}
               pedido={pedidoSeleccionado}
               onCambiarEstado={manejarCambiarEstado}
               estadosPermitidos={estadosPermitidos}
