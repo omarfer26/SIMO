@@ -3,6 +3,7 @@ import { ProductosProvider } from "@/components/catalogo/ProductosContext";
 import { NotificacionesProvider } from "@/components/notificaciones/NotificacionesContext";
 import VigilanteStockMinimo from "@/components/notificaciones/VigilanteStockMinimo";
 import ContenedorNotificaciones from "@/components/notificaciones/ContenedorNotificaciones";
+import ModalExpiracionSesion from "@/components/auth/ModalExpiracionSesion";
 
 // Centro de notificaciones — El provider de avisos va por dentro del de
 // productos porque el VigilanteStockMinimo necesita leer el catálogo para
@@ -16,6 +17,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         <VigilanteStockMinimo />
         <Shell>{children}</Shell>
         <ContenedorNotificaciones />
+        <ModalExpiracionSesion />
       </NotificacionesProvider>
     </ProductosProvider>
   );

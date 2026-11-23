@@ -14,8 +14,8 @@
 import { borrarCanastaGuardada } from "@/lib/ventas/canastaGuardada";
 import type { CodigoRol, SesionIniciada } from "./tipos";
 
-// El backend firma el JWT con 8 horas de vida; la cookie dura lo mismo.
-const DURACION_SEGUNDOS = 8 * 60 * 60;
+// El backend firma el JWT con 30 minutos de vida (RNF-05); la cookie dura lo mismo.
+const DURACION_SEGUNDOS = 30 * 60;
 
 function escribirCookie(nombre: string, valor: string, maxAge: number) {
   document.cookie = `${nombre}=${encodeURIComponent(valor)}; path=/; max-age=${maxAge}; SameSite=Lax`;
@@ -33,18 +33,26 @@ export function guardarSesion(sesion: SesionIniciada) {
   escribirCookie("token", sesion.token, DURACION_SEGUNDOS);
   escribirCookie("role", sesion.usuario.rol, DURACION_SEGUNDOS);
   escribirCookie("userId", String(sesion.usuario.id), DURACION_SEGUNDOS);
+  if (sesion.usuario.correo) {
+    escribirCookie("userEmail", sesion.usuario.correo, DURACION_SEGUNDOS);
+  }
 }
 
 export function cerrarSesion() {
   escribirCookie("token", "", 0);
   escribirCookie("role", "", 0);
   escribirCookie("userId", "", 0);
+  escribirCookie("userEmail", "", 0);
   // Restos de la versión anterior del login, que guardaba en localStorage.
   localStorage.removeItem("token");
   localStorage.removeItem("role");
   // SCRUM-121 (Camilo) — La canasta del POS que haya quedado guardada es de
   // quien está saliendo: se borra para que el siguiente no la vea.
   borrarCanastaGuardada();
+}
+
+export function leerCorreoUsuario(): string | null {
+  return leerCookie("userEmail");
 }
 
 export function leerToken(): string | null {
@@ -64,4 +72,32 @@ export function leerIdUsuario(): number | null {
 export function leerRol(): CodigoRol | null {
   const rol = leerCookie("role");
   return rol === "ADMIN" || rol === "GERENTE" || rol === "INVENTARIO" || rol === "VENDEDOR" ? rol : null;
+}
+
+/**
+ * Lee el timestamp de expiración del JWT (en milisegundos).
+ * Retorna null si no hay token o no tiene claim exp.
+ */
+export function obtenerExpiracionToken(): number | null {
+  const token = leerToken();
+  if (!token) return null;
+  try {
+    const partes = token.split(".");
+    if (partes.length < 2) return null;
+    const base64Url = partes[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    const parsed = JSON.parse(jsonPayload);
+    if (typeof parsed.exp === "number") {
+      return parsed.exp * 1000;
+    }
+  } catch {
+    // Si no se puede decodificar, retorna null
+  }
+  return null;
 }
