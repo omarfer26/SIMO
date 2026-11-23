@@ -48,41 +48,56 @@ body {
 
 /* =====================================================================
    Reglas de Impresión Térmica (80mm) para Tickets POS
+   SCRUM-158 (Camilo) — Solo aplican cuando el ticket (#ticket-impresion)
+   está en pantalla: así Ctrl+P en el POS imprime únicamente la tirilla, y las
+   demás páginas se imprimen normal (antes todo se encogía a 80 mm y se
+   ocultaban todos los <header>, incluido el del propio ticket).
+   El tamaño de la hoja (@page 80 mm × alto del ticket) lo pone
+   components/ventas/TicketTermico.tsx, porque el alto depende de cada venta
+   (`size: 80mm auto` no es CSS válido y el navegador lo ignoraba).
    ===================================================================== */
 @media print {
-  @page {
-    size: 80mm auto;
-    margin: 0;
-  }
-
-  html,
-  body {
-    background: #ffffff !important;
-    color: #000000 !important;
-    width: 80mm !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  /* Ocultar elementos generales y de interfaz de usuario al imprimir */
-  header,
-  aside,
-  nav,
-  button,
-  .no-print,
-  [role="dialog"] > div:first-child, /* backdrop de modal */
-  [role="dialog"] button {
+  /* En cualquier página: lo marcado como no imprimible (toasts, avisos). */
+  .no-print {
     display: none !important;
   }
 
-  /* El contenedor del ticket ocupa el ancho exacto del cabezal térmico */
-  .ticket-termico {
-    width: 76mm !important;
-    max-width: 76mm !important;
-    margin: 0 auto !important;
-    padding: 2mm 1mm !important;
+  /* Todo lo que no sea el ticket ni lo contenga, se oculta. */
+  body:has(#ticket-impresion)
+    *:not(#ticket-impresion, #ticket-impresion *, :has(#ticket-impresion)) {
+    display: none !important;
+  }
+
+  /* Los contenedores del ticket (el modal) pierden posición, márgenes,
+     scroll y fondo, para que el ticket quede pegado a la esquina de la hoja. */
+  body:has(#ticket-impresion),
+  body:has(#ticket-impresion) *:has(#ticket-impresion) {
+    position: static !important;
+    display: block !important;
+    inset: auto !important;
+    transform: none !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
-    border: none !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    opacity: 1 !important;
+  }
+
+  /* El ticket mide lo mismo que en la vista previa (80 mm, 4 mm por lado),
+     sin sombra ni contorno, en negro puro (la térmica no imprime grises). */
+  .ticket-termico {
+    width: 80mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
     color: #000000 !important;
     background: #ffffff !important;
   }

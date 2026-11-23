@@ -10,6 +10,9 @@
 // - Subtotal, Descuento, Impuestos (IVA discriminado) y Total en COP
 // - Método de pago, recibido y cambio
 // - Pie de comprobante con mensaje de agradecimiento y resolución DIAN/Facturación
+//
+// SCRUM-158 (Camilo) — Impresión en formato exacto de 80 mm: la hoja mide
+// 80 mm × el alto del ticket, y lo impreso sale igual a la vista previa.
 
 import React from "react";
 import Button from "@/components/ui/Button";
@@ -33,6 +36,21 @@ const formatoFecha = new Intl.DateTimeFormat("es-CO", {
   minute: "2-digit",
   second: "2-digit",
 });
+
+// SCRUM-158 (Camilo) — Medidas de la tirilla. El rollo mide 80 mm; las
+// impresoras POS imprimen ~72 mm, por eso el ticket deja 4 mm a cada lado.
+const ANCHO_ROLLO_MM = 80;
+const MM_POR_PX = 25.4 / 96; // en CSS, 1 pulgada = 96 px = 25,4 mm
+
+/** Alto del ticket en mm, redondeado hacia arriba (offsetHeight no se afecta por la animación del modal). */
+function altoEnMm(ticket: HTMLElement): number {
+  return Math.ceil(ticket.offsetHeight * MM_POR_PX) + 1;
+}
+
+/** Hoja de impresión del tamaño exacto del ticket: 80 mm de ancho × su alto. */
+function reglaPagina(altoMm: number): string {
+  return `@page { size: ${ANCHO_ROLLO_MM}mm ${altoMm}mm; margin: 0; }`;
+}
 
 export interface DatosTicket {
   venta: VentaRegistrada;
@@ -84,105 +102,120 @@ export default function TicketTermico({
 
   const fechaImpresion = venta.fecha ? new Date(venta.fecha) : new Date();
 
-  // Función para imprimir únicamente el ticket de 80mm de forma aislada
-  // Crea un documento temporal (iframe / ventana de impresión) exclusivamente con el comprobante,
-  // eliminando por completo el fondo del POS y limpiándolo de memoria al terminar.
-  const ejecutarImpresion = () => {
-    const elementoTicket = document.getElementById("ticket-impresion");
-    if (!elementoTicket) return;
+  // SCRUM-158 (Camilo) — Para Ctrl+P: mientras el ticket esté en pantalla, la
+  // página del navegador mide 80 mm × el alto real del ticket (ver globals.css).
+  const refTicket = React.useRef<HTMLElement>(null);
+  React.useEffect(() => {
+    const ticket = refTicket.current;
+    if (!ticket) return;
+    const estilo = document.createElement("style");
+    estilo.dataset.simo = "pagina-ticket-80mm";
+    document.head.appendChild(estilo);
+    const actualizar = () => {
+      estilo.textContent = `@media print { ${reglaPagina(altoEnMm(ticket))} }`;
+    };
+    actualizar();
+    const observador = new ResizeObserver(actualizar);
+    observador.observe(ticket);
+    return () => {
+      observador.disconnect();
+      estilo.remove();
+    };
+  }, []);
 
-    // Crear un iframe temporal invisible
+  // SCRUM-158 (Camilo) — Botón "Imprimir": copia el ticket a un iframe oculto
+  // con las MISMAS hojas de estilo de la app (antes era un CSS escrito a mano
+  // al que le faltaban clases, y lo impreso no se parecía a la vista previa),
+  // mide su alto y le pone una página de 80 mm × ese alto. Así la tirilla
+  // sale de una sola pieza, sin hoja Carta y sin papel en blanco al final.
+  const imprimiendo = React.useRef(false);
+  const ejecutarImpresion = async () => {
+    const elementoTicket = refTicket.current;
+    if (!elementoTicket || imprimiendo.current) return;
+    imprimiendo.current = true;
+
     const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "none";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.tabIndex = -1;
+    // Fuera de la pantalla, pero con el ancho del rollo para que el texto
+    // se acomode igual que en la vista previa.
+    Object.assign(iframe.style, {
+      position: "fixed",
+      left: "-10000px",
+      top: "0",
+      width: `${ANCHO_ROLLO_MM}mm`,
+      height: "10px",
+      border: "0",
+    });
     document.body.appendChild(iframe);
 
-    const docIframe = iframe.contentWindow?.document;
-    if (!docIframe) {
-      window.print();
+    const quitar = () => {
+      iframe.remove();
+      imprimiendo.current = false;
+    };
+    const ventana = iframe.contentWindow;
+    const doc = ventana?.document;
+    if (!ventana || !doc) {
+      quitar();
+      window.print(); // globals.css deja solo el ticket en la hoja
       return;
     }
 
-    // Estilos CSS exactos para tirilla continua de 80mm
-    const contenidoHTML = `
-      <!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="utf-8" />
-        <title>Recibo #${venta.idVenta}</title>
-        <style>
-          @page {
-            size: 80mm auto;
-            margin: 0;
-          }
-          * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-          body {
-            width: 76mm;
-            max-width: 76mm;
-            margin: 0 auto;
-            padding: 4mm 2mm;
-            background: #ffffff !important;
-            color: #000000 !important;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            font-size: 11px;
-            line-height: 1.25;
-          }
-          header { text-align: center; margin-bottom: 6px; }
-          h1 { font-size: 13px; font-weight: 900; text-transform: uppercase; margin-bottom: 2px; }
-          table { width: 100%; border-collapse: collapse; margin: 6px 0; }
-          th, td { font-size: 10px; padding: 2px 0; }
-          th { border-bottom: 1px dashed #000000; text-align: left; }
-          tbody tr { border-bottom: 1px dotted #888888; }
-          .flex { display: flex; justify-content: space-between; align-items: flex-start; }
-          .justify-between { justify-content: space-between; }
-          .text-center { text-align: center; }
-          .text-right { text-align: right; }
-          .font-bold { font-weight: 700; }
-          .font-black { font-weight: 900; }
-          .font-semibold { font-weight: 600; }
-          .uppercase { text-transform: uppercase; }
-          .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .border-b { border-bottom: 1px dashed #000000; }
-          .border-t { border-top: 1px dashed #000000; }
-          .border-y { border-top: 1px dashed #000000; border-bottom: 1px dashed #000000; }
-          .border-dashed { border-style: dashed; }
-          .border-black { border-color: #000000; }
-          .my-2 { margin-top: 6px; margin-bottom: 6px; }
-          .pt-1 { padding-top: 4px; }
-          .pb-2 { padding-bottom: 6px; }
-          .text-zinc-600 { color: #4b5563; }
-        </style>
-      </head>
-      <body>
-        ${elementoTicket.innerHTML}
-      </body>
-      </html>
-    `;
+    // Las hojas de estilo de la app (Tailwind + fuentes). `link.href` ya
+    // viene como dirección completa, así que sirven dentro del iframe.
+    const estilosApp = Array.from(
+      document.head.querySelectorAll<HTMLLinkElement | HTMLStyleElement>(
+        'link[rel="stylesheet"], style:not([data-simo])',
+      ),
+    )
+      .map((nodo) =>
+        nodo instanceof HTMLLinkElement
+          ? `<link rel="stylesheet" href="${nodo.href}" />`
+          : nodo.outerHTML,
+      )
+      .join("\n");
 
-    docIframe.open();
-    docIframe.write(contenidoHTML);
-    docIframe.close();
+    doc.open();
+    doc.write(`<!DOCTYPE html>
+<html lang="es" class="${document.documentElement.className}">
+<head>
+<meta charset="utf-8" />
+<title>Recibo #${venta.idVenta}</title>
+${estilosApp}
+<style data-simo="pagina"></style>
+</head>
+<body>${elementoTicket.outerHTML}</body>
+</html>`);
+    doc.close();
 
-    // Esperar a que renderice e invocar impresión aislada
+    // Esperar a que carguen los estilos y la letra antes de medir.
+    await Promise.all(
+      Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')).map(
+        (link) =>
+          link.sheet
+            ? null
+            : new Promise((listo) => {
+                link.addEventListener("load", listo, { once: true });
+                link.addEventListener("error", listo, { once: true });
+              }),
+      ),
+    );
+    await doc.fonts.ready;
+
+    const ticketCopia = doc.getElementById("ticket-impresion");
+    const estiloPagina = doc.querySelector<HTMLStyleElement>('style[data-simo="pagina"]');
+    if (ticketCopia && estiloPagina) {
+      estiloPagina.textContent = reglaPagina(altoEnMm(ticketCopia));
+    }
+
+    // El iframe se quita cuando se cierra el diálogo de impresión
+    // (o al minuto, por si el navegador no avisa).
+    ventana.addEventListener("afterprint", () => setTimeout(quitar, 0), { once: true });
     setTimeout(() => {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-
-      // Eliminar el documento temporal una vez atendida la impresión
-      setTimeout(() => {
-        if (document.body.contains(iframe)) {
-          document.body.removeChild(iframe);
-        }
-      }, 1000);
-    }, 250);
+      if (document.body.contains(iframe)) quitar();
+    }, 60_000);
+    ventana.focus();
+    ventana.print();
   };
 
   React.useEffect(() => {
@@ -234,9 +267,12 @@ export default function TicketTermico({
       </div>
 
       {/* Tirilla Térmica de 80mm */}
+      {/* SCRUM-158 (Camilo) — Sin alto mínimo (la vista previa mide lo mismo
+          que el papel) y con ring en vez de border (el ring no le quita ancho). */}
       <article
         id="ticket-impresion"
-        className="ticket-termico w-[80mm] min-h-[120mm] bg-white text-black p-3 font-mono text-[11px] leading-tight shadow-md border border-zinc-200 print:border-none print:shadow-none print:p-0 print:m-0"
+        ref={refTicket}
+        className="ticket-termico w-[80mm] bg-white text-black px-[4mm] py-[3mm] font-mono text-[11px] leading-tight shadow-md ring-1 ring-zinc-200"
       >
         {/* Encabezado del Negocio */}
         <header className="text-center space-y-0.5">
@@ -292,7 +328,7 @@ export default function TicketTermico({
               <th className="py-1 text-right">Subt.</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-dotted divide-zinc-400">
+          <tbody className="divide-y divide-dotted divide-black">
             {items.map((item) => (
               <tr key={item.producto.id} className="align-top">
                 <td className="py-1 text-center font-bold">{item.cantidad}</td>
@@ -300,7 +336,7 @@ export default function TicketTermico({
                   <div className="font-semibold leading-tight line-clamp-2">
                     {item.producto.nombre}
                   </div>
-                  <div className="text-[9px] text-zinc-600">
+                  <div className="text-[9px]">
                     SKU: {item.producto.codigo} | @ {formatoMoneda.format(item.producto.precioVenta)}
                   </div>
                 </td>
@@ -328,7 +364,7 @@ export default function TicketTermico({
               <span>-{formatoMoneda.format(descuento)}</span>
             </div>
           )}
-          <div className="flex justify-between text-[9px] text-zinc-600">
+          <div className="flex justify-between text-[9px]">
             <span>IVA incluido (19% est.):</span>
             <span>{formatoMoneda.format(impuestos > 0 ? impuestos : Math.round(total * 0.19 / 1.19))}</span>
           </div>
@@ -369,7 +405,7 @@ export default function TicketTermico({
         {/* Pie de Recibo / Resolución */}
         <footer className="mt-3 pt-2 border-t border-dashed border-black text-center space-y-1 text-[9px]">
           <p className="font-semibold">¡GRACIAS POR SU COMPRA!</p>
-          <p className="text-[8px] leading-tight text-zinc-600">
+          <p className="text-[8px] leading-tight">
             Régimen Simple de Tributación • Sistema SIMO POS
             <br />
             Conserve este comprobante para cambios o reclamos de garantía.
