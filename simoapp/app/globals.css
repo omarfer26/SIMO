@@ -46,6 +46,23 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* SCRUM-160 (Camilo) — Listas desplegables iguales en todos los navegadores.
+   Safari dibuja el <select> nativo a su manera (píldora blanca con degradado)
+   y no respeta el fondo ni el borde que le da Tailwind; Chrome y Firefox
+   tampoco ponen la misma flecha. Aquí se quita el estilo nativo y se pone una
+   flecha propia. Los que ya traen la suya (components/ui/Select.tsx usa
+   `appearance-none` y un ícono aparte) quedan fuera. Va sin @layer a
+   propósito, para ganarle al `px-2` de Tailwind y dejar sitio a la flecha. */
+select:not(.appearance-none):not([multiple]):not([size]) {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem 1rem;
+  padding-right: 2rem;
+}
+
 /* =====================================================================
    Reglas de Impresión Térmica (80mm) para Tickets POS
    ===================================================================== */

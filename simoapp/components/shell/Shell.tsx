@@ -6,15 +6,29 @@
 // celular, y si el Sidebar está colapsado en escritorio. Se usa una sola vez,
 // envolviendo toda la app desde app/layout.tsx.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Navbar from "./Navbar";
 import Sidebar from "./Sidebar";
 import BannerConexion from "./BannerConexion";
 import BannerStockMinimo from "@/components/notificaciones/BannerStockMinimo";
 
+// SCRUM-160 (Camilo) — Por debajo de 1280 px (tablet en horizontal o laptop
+// chica) el menú arranca colapsado en íconos, para dejarle espacio al POS y a
+// las tablas. El usuario lo puede expandir con la flecha; solo se vuelve a
+// colapsar o expandir solo si la ventana cruza los 1280 px.
+const CONSULTA_PANTALLA_ANGOSTA = "(max-width: 1279px)";
+
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [sidebarAbiertoEnMobile, setSidebarAbiertoEnMobile] = useState(false);
   const [sidebarColapsado, setSidebarColapsado] = useState(false);
+
+  useEffect(() => {
+    const consulta = window.matchMedia(CONSULTA_PANTALLA_ANGOSTA);
+    const aplicar = () => setSidebarColapsado(consulta.matches);
+    aplicar();
+    consulta.addEventListener("change", aplicar);
+    return () => consulta.removeEventListener("change", aplicar);
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col">

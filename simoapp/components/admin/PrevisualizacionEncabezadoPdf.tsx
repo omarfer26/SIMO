@@ -4,8 +4,13 @@
 // Diseñada para mostrar fielmente cómo se estampará el encabezado institucional
 // en los reportes generados en PDF (A4).
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { Empresa } from "@/components/shell/tipos";
+
+// SCRUM-160 (Camilo) — Ayudantes de la fecha de muestra (ver más abajo).
+const sinSuscripcion = () => () => {};
+const fechaActual = () =>
+  new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short" }).format(new Date());
 
 interface PrevisualizacionEncabezadoPdfProps {
   empresa: Empresa;
@@ -18,10 +23,13 @@ export default function PrevisualizacionEncabezadoPdf({
 }: PrevisualizacionEncabezadoPdfProps) {
   const [zoom, setZoom] = useState<"compacto" | "real">("compacto");
 
-  const fechaMuestra = new Intl.DateTimeFormat("es-CO", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date());
+  // SCRUM-160 (Camilo) — La fecha de muestra se calcula ya en el navegador.
+  // /admin se arma al compilar (página estática): con `new Date()` directo en
+  // el render, el HTML traía la hora del build y el navegador la de ahora, y
+  // React lanzaba el error #418 (el texto no coincide) en Chrome, Firefox y
+  // Safari. useSyncExternalStore usa "—" al armar el HTML y la hora real en
+  // el navegador, sin ese choque.
+  const fechaMuestra = useSyncExternalStore(sinSuscripcion, fechaActual, () => "—");
 
   return (
     <div className={`${compacto ? "mt-0" : "mt-8"} rounded-xl border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900 sm:p-5`}>

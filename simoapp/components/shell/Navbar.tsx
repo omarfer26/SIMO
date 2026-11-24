@@ -57,7 +57,7 @@ export default function Navbar({ onAbrirSidebarMobile }: NavbarProps) {
         type="button"
         onClick={onAbrirSidebarMobile}
         aria-label="Abrir menú de navegación"
-        className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 md:hidden"
+        className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 lg:hidden"
       >
         <svg
           viewBox="0 0 24 24"

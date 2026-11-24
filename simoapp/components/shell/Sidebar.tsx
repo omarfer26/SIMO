@@ -2,11 +2,14 @@
 
 // SCRUM-107 (Camilo) — Sidebar lateral del Shell, con navegación entre
 // módulos. Dos comportamientos distintos según el tamaño de pantalla:
-//  - Escritorio (md hacia arriba): siempre visible, se puede "colapsar" a
+//  - Escritorio (lg hacia arriba): siempre visible, se puede "colapsar" a
 //    solo íconos con el botón de la flecha (más espacio para el contenido).
-//  - Celular/tablet chico: oculto por defecto, aparece como un cajón (drawer)
+//  - Celular y tablet: oculto por defecto, aparece como un cajón (drawer)
 //    encima del contenido cuando se abre desde el botón de hamburguesa del
 //    Navbar, con un fondo oscuro detrás para cerrarlo tocando afuera.
+// SCRUM-160 (Camilo) — El corte pasó de md (768 px) a lg (1024 px). Con el
+// menú fijo, una tablet en vertical (768 px) quedaba con ~500 px de contenido
+// y los títulos y el aviso de stock se partían palabra por palabra.
 // El módulo activo se resalta comparando la ruta actual (usePathname) contra
 // el href de cada ítem.
 
@@ -33,21 +36,21 @@ export default function Sidebar({
     <>
       {abiertoEnMobile && (
         <div
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
           onClick={onCerrarEnMobile}
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-zinc-200 bg-white pt-14 transition-transform duration-200 dark:border-zinc-800 dark:bg-zinc-950 md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:pt-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-zinc-200 bg-white pt-14 transition-transform duration-200 dark:border-zinc-800 dark:bg-zinc-950 lg:sticky lg:top-14 lg:h-[calc(100vh-3.5rem)] lg:translate-x-0 lg:pt-0 ${
           abiertoEnMobile ? "translate-x-0" : "-translate-x-full"
-        } ${colapsado ? "md:w-16" : "md:w-60"}`}
+        } ${colapsado ? "lg:w-16" : "lg:w-60"}`}
       >
         <button
           type="button"
           onClick={onAlternarColapsado}
           aria-label={colapsado ? "Expandir menú" : "Colapsar menú"}
-          className="hidden shrink-0 items-center justify-center border-b border-zinc-200 py-2 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 md:flex"
+          className="hidden shrink-0 items-center justify-center border-b border-zinc-200 py-2 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 lg:flex"
         >
           <svg
             viewBox="0 0 24 24"
@@ -76,7 +79,7 @@ export default function Sidebar({
                 onClick={onCerrarEnMobile}
                 title={colapsado ? modulo.nombre : undefined}
                 className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  colapsado ? "md:justify-center" : ""
+                  colapsado ? "lg:justify-center" : ""
                 } ${
                   activo
                     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
@@ -84,7 +87,7 @@ export default function Sidebar({
                 }`}
               >
                 {modulo.icono}
-                <span className={colapsado ? "md:hidden" : ""}>
+                <span className={colapsado ? "lg:hidden" : ""}>
                   {modulo.nombre}
                 </span>
               </Link>

@@ -84,9 +84,16 @@ export function Modal({
     }
   };
 
+  // SCRUM-160 (Camilo) — Dos ajustes de compatibilidad:
+  //  - El margen de 1 rem (p-4) va en todos los tamaños. Antes se quitaba desde
+  //    640 px (sm:p-0), y en una tablet de 768 px el modal ancho de "Nuevo
+  //    pedido" (max-w-3xl = 768 px) quedaba pegado a los dos bordes.
+  //  - El alto máximo del cuerpo usa `dvh` donde el navegador lo entiende. En
+  //    Safari de iPhone `100vh` cuenta también la barra de direcciones, y el
+  //    final del modal podía quedar tapado. Los navegadores viejos siguen con vh.
   const modalContent = (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-0"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       aria-labelledby="modal-title"
       role="dialog"
       aria-modal="true"
@@ -128,7 +135,7 @@ export function Modal({
         </div>
 
         {/* Body */}
-        <div className="px-6 py-4 overflow-y-auto max-h-[calc(100vh-16rem)]">
+        <div className="px-6 py-4 overflow-y-auto max-h-[calc(100vh-16rem)] supports-[height:100dvh]:max-h-[calc(100dvh-16rem)]">
           {contenidoVisible}
         </div>
 
